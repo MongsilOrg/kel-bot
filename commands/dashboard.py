@@ -1,0 +1,211 @@
+"""대시보드 setup/refresh + 신청·취소 버튼 콜백."""
+from __future__ import annotations
+
+import logging
+from datetime import date as date_cls, timedelta
+from pathlib import Path
+
+import discord
+
+from commands.ui.layout_helpers import error_view, info_view, success_view
+from commands.ui.views import (
+    CancelConfirmView,
+    DashboardSnapshot,
+    DashboardView,
+)
+from config.settings import Settings
+from models.application import ApplicationError
+from models.draw_orchestrator import DrawResult
+from models.draw_state import DrawStatus
+from models.schedule_manager import ScheduleManager
+from services.discord_service import (
+    fetch_message_safe,
+    fetch_text_channel,
+    load_message_id,
+    save_message_id,
+)
+from utils.nickname import NicknameFormatError, parse as parse_nickname
+from utils.time import KST, kst_at, now_kst
+
+logger = logging.getLogger(__name__)
+
+
+class DashboardController:
+    """대시보드 메시지 관리 + 버튼 콜백 + 추첨 결과 공지."""
+
+    def __init__(self, bot: discord.Client, settings: Settings, schedule: ScheduleManager) -> None:
+        self.bot = bot
+        self.settings = settings
+        self.schedule = schedule
+        self._dashboard_path: Path = settings.data_dir / "dashboard_message.json"
+        self._dashboard_message: discord.Message | None = None
+
+    # 부팅 시 초기화 --------------------------------------------------------
+    async def setup(self) -> None:
+        channel = await fetch_text_channel(self.bot, self.settings.apply_channel_id)
+        message_id = load_message_id(self._dashboard_path)
+        message: discord.Message | None = None
+        if message_id:
+            message = await fetch_message_safe(channel, message_id)
+        if message is None:
+            view = self._build_dashboard_view()
+            message = await channel.send(view=view)
+            save_message_id(self._dashboard_path, message.id)
+            logger.info("대시보드 메시지 신규 생성: %s", message.id)
+        else:
+            await self._edit_message(message)
+            logger.info("기존 대시보드 메시지 재바인딩: %s", message.id)
+        self._dashboard_message = message
+
+    # 갱신 ----------------------------------------------------------------
+    async def refresh(self) -> None:
+        if self._dashboard_message is None:
+            return
+        try:
+            await self._edit_message(self._dashboard_message)
+        except (discord.NotFound, discord.Forbidden):
+            logger.warning("대시보드 메시지가 손실됨 — 재생성")
+            self._dashboard_message = None
+            await self.setup()
+
+    async def _edit_message(self, message: discord.Message) -> None:
+        view = self._build_dashboard_view()
+        await message.edit(view=view, content=None)
+
+    def _build_dashboard_view(self) -> DashboardView:
+        snapshot = self._current_snapshot()
+        return DashboardView(
+            snapshot=snapshot,
+            apply_handler=self.handle_apply,
+            cancel_handler=self.handle_cancel,
+        )
+
+    def _current_snapshot(self) -> DashboardSnapshot:
+        state = self.schedule.state
+        scrim_date = state.draw_state.scrim_date
+        priority_regions = state.priorities.regions_for(scrim_date)
+        next_date = (date_cls.fromisoformat(scrim_date) + timedelta(days=1)).isoformat()
+        next_day_priority_regions = state.priorities.regions_for(next_date)
+        application_open = self._is_application_window_open(scrim_date)
+        return DashboardSnapshot(
+            scrim_date=scrim_date,
+            team_slots=self.settings.team_slots,
+            applications=state.applications.active(),
+            priority_regions=priority_regions,
+            next_day_priority_regions=next_day_priority_regions,
+            draw_status=state.draw_state.status,
+            drawn_at=state.draw_state.drawn_at,
+            deadline_processed=state.draw_state.deadline_processed,
+            application_open=application_open,
+        )
+
+    def _is_application_window_open(self, scrim_date: str) -> bool:
+        state = self.schedule.state
+        if state.draw_state.is_application_closed():
+            return False
+        moment = now_kst()
+        d = date_cls.fromisoformat(scrim_date)
+        deadline_at = kst_at(d, self.settings.deadline_hour, 0)
+        return moment < deadline_at
+
+    # 버튼 콜백 ------------------------------------------------------------
+    async def handle_apply(self, interaction: discord.Interaction) -> None:
+        scrim_date = self.schedule.state.draw_state.scrim_date
+        if not self._is_application_window_open(scrim_date):
+            await interaction.response.send_message(
+                view=info_view("지금은 신청 시간이 아닙니다."),
+                ephemeral=True,
+            )
+            return
+        member = interaction.user
+        display_name = getattr(member, "display_name", None) or member.name
+        try:
+            parsed = parse_nickname(display_name)
+        except NicknameFormatError as exc:
+            await interaction.response.send_message(
+                view=error_view(str(exc)),
+                ephemeral=True,
+            )
+            return
+
+        async with self.schedule.lock:
+            if not self._is_application_window_open(self.schedule.state.draw_state.scrim_date):
+                await interaction.response.send_message(
+                    view=info_view("신청이 마감되었습니다."),
+                    ephemeral=True,
+                )
+                return
+            store = self.schedule.state.applications
+            priorities = self.schedule.state.priorities
+            try:
+                had_priority = priorities.has(parsed.region, self.schedule.state.draw_state.scrim_date)
+                store.add(
+                    region=parsed.region,
+                    applicant_id=str(member.id),
+                    applicant_display=display_name,
+                    had_priority=had_priority,
+                )
+            except ApplicationError as exc:
+                await interaction.response.send_message(
+                    view=info_view(str(exc)),
+                    ephemeral=True,
+                )
+                return
+
+        if had_priority:
+            body = f"`{parsed.region}` 신청 완료\n우선권이 적용되었습니다."
+        else:
+            body = f"`{parsed.region}` 신청 완료"
+        await interaction.response.send_message(
+            view=success_view(body),
+            ephemeral=True,
+        )
+        await self.schedule.trigger_instant_draw_if_ready()
+        await self.refresh()
+
+    async def handle_cancel(self, interaction: discord.Interaction) -> None:
+        state = self.schedule.state
+        if state.draw_state.is_application_closed():
+            await interaction.response.send_message(
+                view=info_view("추첨이 완료되어 취소할 수 없습니다."),
+                ephemeral=True,
+            )
+            return
+        existing = state.applications.by_user(str(interaction.user.id))
+        if existing is None:
+            await interaction.response.send_message(
+                view=info_view("등록된 신청이 없습니다."),
+                ephemeral=True,
+            )
+            return
+
+        confirm_view = CancelConfirmView(
+            region=existing.region,
+            on_confirm=self._confirm_cancel,
+        )
+        await interaction.response.send_message(view=confirm_view, ephemeral=True)
+
+    async def _confirm_cancel(self, interaction: discord.Interaction) -> None:
+        async with self.schedule.lock:
+            if self.schedule.state.draw_state.is_application_closed():
+                await interaction.response.edit_message(
+                    view=info_view("추첨이 완료되어 취소할 수 없습니다.")
+                )
+                return
+            store = self.schedule.state.applications
+            try:
+                app = store.cancel_by_user(str(interaction.user.id))
+            except ApplicationError as exc:
+                await interaction.response.edit_message(view=info_view(str(exc)))
+                return
+        await interaction.response.edit_message(
+            view=success_view(f"`{app.region}` 신청을 취소했습니다."),
+        )
+        await self.refresh()
+
+    # 추첨/데드라인 이벤트 — 대시보드만 갱신 (별도 채널 송신 없음)
+    async def announce_draw(self, result: DrawResult) -> None:
+        await self.refresh()
+
+    async def announce_deadline_cancelled(self) -> None:
+        await self.refresh()
