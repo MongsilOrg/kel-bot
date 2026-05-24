@@ -162,37 +162,27 @@ class DashboardView(LayoutView):
         self.cancel_button.callback = self._on_cancel
 
         title = _format_scrim_title(snapshot.scrim_date)
-        schedule = (
-            "📋 **일정**\n"
-            "`23:00` 신청 오픈\n"
-            "`00:30` 1차 추첨\n"
-            "`17:00` 신청 마감"
-        )
-
-        status_line = (
-            f"📊 **현황** · {_draw_status_label(snapshot)}\n"
-            f"신청 `{len(snapshot.applications)} / {snapshot.team_slots}`팀"
-        )
+        status_label = _draw_status_label(snapshot)
+        count = f"`{len(snapshot.applications)} / {snapshot.team_slots}`팀"
+        header_status = f"{status_label} · {count}"
 
         is_done = snapshot.draw_status is DrawStatus.DONE
+
+        header_lines = [f"## {title}", header_status]
         if not is_done and snapshot.priority_regions:
             priority_text = ", ".join(sorted(snapshot.priority_regions))
-            status_line += f"\n우선권 · {priority_text}"
+            header_lines.append(f"⭐ 우선권 · {priority_text}")
 
         children = [
-            TextDisplay(content=f"## {title}"),
-            TextDisplay(content=schedule),
-            Separator(),
-            TextDisplay(content=status_line),
+            TextDisplay(content="\n".join(header_lines)),
             Separator(),
         ]
 
         if is_done:
             selected = _format_selected_lines(snapshot)
-            rejected = _format_rejected_lines(snapshot)
             children.append(TextDisplay(content=f"### 선정 8팀\n{selected}"))
             if any(a.status is ApplicationStatus.REJECTED for a in snapshot.applications):
-                children.append(Separator())
+                rejected = _format_rejected_lines(snapshot)
                 children.append(TextDisplay(content=f"### 탈락 팀\n{rejected}"))
             if snapshot.next_day_priority_regions:
                 next_priority_text = ", ".join(sorted(snapshot.next_day_priority_regions))
@@ -200,15 +190,16 @@ class DashboardView(LayoutView):
         else:
             teams = _format_pending_lines(snapshot)
             children.append(TextDisplay(content=f"### 신청 팀\n{teams}"))
-            children.append(Separator())
-            children.append(
-                TextDisplay(
-                    content="닉네임을 `지역) 닉네임` 형식으로 설정 후 아래 버튼을 눌러주세요."
-                )
-            )
 
         children.append(ActionRow(self.apply_button, self.cancel_button))
-        children.append(TextDisplay(content=FOOTER_TEXT))
+        children.append(
+            TextDisplay(
+                content=(
+                    "-# `23:00` 초기화 · `00:30` 추첨 · `17:00` 마감 · "
+                    "닉네임 `지역) 이름` 필수"
+                )
+            )
+        )
 
         self.add_item(Container(*children, accent_colour=Color.green()))
 
