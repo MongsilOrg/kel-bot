@@ -55,7 +55,7 @@ def load_settings() -> Settings:
         guild_id=_optional_id("GUILD_ID"),
         apply_channel_id=int(_required("APPLY_CHANNEL_ID")),
         log_channel_id=_optional_id("LOG_CHANNEL_ID"),
-        reset_hour=_optional_int("RESET_HOUR", 23),
+        reset_hour=_optional_int("RESET_HOUR", 21),
         draw_hour=_optional_int("DRAW_HOUR", 0),
         draw_minute=_optional_int("DRAW_MINUTE", 30),
         deadline_hour=_optional_int("DEADLINE_HOUR", 17),

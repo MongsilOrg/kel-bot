@@ -195,7 +195,7 @@ class DashboardView(LayoutView):
         children.append(
             TextDisplay(
                 content=(
-                    "-# `23:00` 초기화 · `00:30` 추첨 · `17:00` 마감 · "
+                    "-# `21:00` 초기화 · `00:30` 추첨 · `17:00` 마감 · "
                     "닉네임 `지역) 이름` 필수"
                 )
             )

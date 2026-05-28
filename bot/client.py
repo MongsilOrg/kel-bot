@@ -57,4 +57,4 @@ class KelBot(commands.Bot):
         await self.dashboard.setup()
         await self.schedule.catch_up()
         self.schedule.start()
-        logger.info("스케줄러 가동 — 23:00 리셋 / 00:30 추첨 / 17:00 데드라인 KST")
+        logger.info("스케줄러 가동 — 21:00 리셋 / 00:30 추첨 / 17:00 데드라인 KST")

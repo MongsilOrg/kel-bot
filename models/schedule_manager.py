@@ -35,7 +35,7 @@ class StateBundle:
 class ScheduleManager:
     """일일 운영 스케줄 + 재시작 보정.
 
-    - 23:00 일일 리셋
+    - 21:00 일일 리셋
     - 00:30 1차 추첨 (미달 시 보류)
     - 17:00 데드라인 (미달 취소 + 우선권 소멸)
     - 신청/취소 이벤트 시 즉시 추첨 트리거
@@ -63,7 +63,7 @@ class ScheduleManager:
             draw_state=DrawState.load(data_dir / "draw_state.json", scrim_date),
         )
 
-        self._reset_task = tasks.loop(time=time(hour=23, minute=0, tzinfo=KST))(self._run_reset)
+        self._reset_task = tasks.loop(time=time(hour=21, minute=0, tzinfo=KST))(self._run_reset)
         self._draw_task = tasks.loop(time=time(hour=0, minute=30, tzinfo=KST))(self._run_draw)
         self._deadline_task = tasks.loop(time=time(hour=17, minute=0, tzinfo=KST))(self._run_deadline)
 
