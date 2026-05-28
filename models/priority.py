@@ -78,6 +78,19 @@ class PriorityStore:
                 p.consumed = True
         self.save()
 
+    def revoke(self, region: str, valid_for_date: str) -> bool:
+        """지역 단위 활성(미consumed) 우선권 제거. 반환: 제거 여부."""
+        before = len(self.priorities)
+        self.priorities = [
+            p
+            for p in self.priorities
+            if not (p.region == region and p.valid_for_date == valid_for_date and not p.consumed)
+        ]
+        removed = len(self.priorities) < before
+        if removed:
+            self.save()
+        return removed
+
     def expire_for(self, scrim_date: str) -> int:
         """주어진 일자 우선권 모두 제거 (소멸). 반환: 제거 수."""
         before = len(self.priorities)

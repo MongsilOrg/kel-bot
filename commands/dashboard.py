@@ -12,6 +12,7 @@ from commands.ui.views import (
     CancelConfirmView,
     DashboardSnapshot,
     DashboardView,
+    PriorityRemoveView,
 )
 from config.settings import Settings
 from models.application import ApplicationError
@@ -78,6 +79,7 @@ class DashboardController:
             snapshot=snapshot,
             apply_handler=self.handle_apply,
             cancel_handler=self.handle_cancel,
+            remove_priority_handler=self.handle_remove_priority,
         )
 
     def _current_snapshot(self) -> DashboardSnapshot:
@@ -97,6 +99,7 @@ class DashboardController:
             drawn_at=state.draw_state.drawn_at,
             deadline_processed=state.draw_state.deadline_processed,
             application_open=application_open,
+            removal_log=state.audit.entries_for(scrim_date),
         )
 
     def _is_application_window_open(self, scrim_date: str) -> bool:
@@ -200,6 +203,47 @@ class DashboardController:
                 return
         await interaction.response.edit_message(
             view=success_view(f"`{app.region}` 신청을 취소했습니다."),
+        )
+        await self.refresh()
+
+    # 우선권 제거 ----------------------------------------------------------
+    async def handle_remove_priority(self, interaction: discord.Interaction) -> None:
+        scrim_date = self.schedule.state.draw_state.scrim_date
+        regions = sorted(self.schedule.state.priorities.regions_for(scrim_date))
+        if not regions:
+            await interaction.response.send_message(
+                view=info_view("현재 활성 우선권이 없습니다."),
+                ephemeral=True,
+            )
+            return
+        view = PriorityRemoveView(regions=regions, on_select=self._confirm_remove_priority)
+        await interaction.response.send_message(view=view, ephemeral=True)
+
+    async def _confirm_remove_priority(
+        self, interaction: discord.Interaction, region: str
+    ) -> None:
+        async with self.schedule.lock:
+            state = self.schedule.state
+            scrim_date = state.draw_state.scrim_date
+            if not state.priorities.revoke(region, scrim_date):
+                await interaction.response.edit_message(
+                    view=info_view(f"`{region}` 우선권이 이미 없습니다.")
+                )
+                return
+            display = getattr(interaction.user, "display_name", None) or interaction.user.name
+            try:
+                was_self = parse_nickname(display).region == region
+            except NicknameFormatError:
+                was_self = False
+            state.audit.record(
+                region=region,
+                actor_id=str(interaction.user.id),
+                actor_name=display,
+                scrim_date=scrim_date,
+                was_self=was_self,
+            )
+        await interaction.response.edit_message(
+            view=success_view(f"`{region}` 우선권을 제거했습니다."),
         )
         await self.refresh()
 

@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date as date_cls
 from typing import Awaitable, Callable, Dict, List, Optional
 
 import discord
 from discord import ButtonStyle, Color
-from discord.ui import ActionRow, Button, Container, LayoutView, Separator, TextDisplay
+from discord.ui import ActionRow, Button, Container, LayoutView, Select, Separator, TextDisplay
 
 from commands.ui.layout_helpers import (
     FOOTER_TEXT,
@@ -19,6 +19,7 @@ from commands.ui.layout_helpers import (
 )
 from models.application import Application, ApplicationStatus
 from models.draw_state import DrawStatus
+from models.priority_audit import RemovalEntry
 
 _WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 ApplyHandler = Callable[[discord.Interaction], Awaitable[None]]
 CancelHandler = Callable[[discord.Interaction], Awaitable[None]]
+RemovePriorityHandler = Callable[[discord.Interaction], Awaitable[None]]
+RemoveSelectHandler = Callable[[discord.Interaction, str], Awaitable[None]]
 
 
 # 버튼 쿨다운 ---------------------------------------------------------------
@@ -59,6 +62,7 @@ class DashboardSnapshot:
     drawn_at: Optional[str]
     deadline_processed: bool
     application_open: bool
+    removal_log: List[RemovalEntry] = field(default_factory=list)
 
 
 def _format_pending_lines(snapshot: DashboardSnapshot) -> str:
@@ -111,6 +115,15 @@ def _format_rejected_lines(snapshot: DashboardSnapshot) -> str:
     return "\n".join(f"• {a.applicant_display}" for a in apps)
 
 
+def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
+    lines = []
+    for e in entries:
+        when = format_kst_short(e.removed_at) or e.removed_at
+        suffix = " (본인)" if e.was_self else ""
+        lines.append(f"`{when}` {e.region} · <@{e.actor_id}>{suffix}")
+    return "\n".join(lines)
+
+
 def _draw_status_label(snapshot: DashboardSnapshot) -> str:
     apps = len(snapshot.applications)
     if snapshot.draw_status is DrawStatus.DONE:
@@ -158,11 +171,13 @@ class DashboardView(LayoutView):
         snapshot: DashboardSnapshot,
         apply_handler: ApplyHandler,
         cancel_handler: CancelHandler,
+        remove_priority_handler: RemovePriorityHandler,
     ) -> None:
         super().__init__(timeout=None)
         self.snapshot = snapshot
         self.apply_handler = apply_handler
         self.cancel_handler = cancel_handler
+        self.remove_priority_handler = remove_priority_handler
 
         window_closed = not snapshot.application_open
         self.apply_button = Button(
@@ -181,6 +196,14 @@ class DashboardView(LayoutView):
             disabled=window_closed,
         )
         self.cancel_button.callback = self._on_cancel
+        self.remove_priority_button = Button(
+            label="우선권 제거",
+            style=ButtonStyle.secondary,
+            emoji="🚫",
+            custom_id="kel:remove_priority",
+            disabled=window_closed,
+        )
+        self.remove_priority_button.callback = self._on_remove_priority
 
         title = _format_scrim_title(snapshot.scrim_date)
         status_label = _draw_status_label(snapshot)
@@ -220,7 +243,17 @@ class DashboardView(LayoutView):
             teams = _format_pending_lines(snapshot)
             children.append(TextDisplay(content=f"### 신청 팀\n{teams}"))
 
-        children.append(ActionRow(self.apply_button, self.cancel_button))
+        if snapshot.removal_log:
+            children.append(Separator())
+            children.append(
+                TextDisplay(
+                    content=f"### 우선권 제거 로그\n{_format_removal_log_lines(snapshot.removal_log)}"
+                )
+            )
+
+        children.append(
+            ActionRow(self.apply_button, self.cancel_button, self.remove_priority_button)
+        )
         children.append(
             TextDisplay(
                 content=(
@@ -260,6 +293,23 @@ class DashboardView(LayoutView):
             await self.cancel_handler(interaction)
         except Exception:  # noqa: BLE001
             logger.exception("cancel_handler 예외")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    view=error_view("처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요."),
+                    ephemeral=True,
+                )
+
+    async def _on_remove_priority(self, interaction: discord.Interaction) -> None:
+        if not check_cooldown(interaction.user.id):
+            await interaction.response.send_message(
+                view=info_view("잠시 후 다시 시도해주세요."),
+                ephemeral=True,
+            )
+            return
+        try:
+            await self.remove_priority_handler(interaction)
+        except Exception:  # noqa: BLE001
+            logger.exception("remove_priority_handler 예외")
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     view=error_view("처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요."),
@@ -314,6 +364,33 @@ class CancelConfirmView(LayoutView):
         await interaction.response.edit_message(
             view=info_view("이전 화면으로 돌아갔습니다."),
         )
+
+
+# 우선권 제거 ---------------------------------------------------------------
+class PriorityRemoveView(LayoutView):
+    """우선권 제거 지역 선택 LayoutView (ephemeral)."""
+
+    def __init__(self, regions: List[str], on_select: RemoveSelectHandler) -> None:
+        super().__init__(timeout=60)
+        self.on_select = on_select
+        self.select = Select(
+            placeholder="제거할 우선권 지역 선택",
+            min_values=1,
+            max_values=1,
+            options=[discord.SelectOption(label=r, value=r) for r in regions],
+        )
+        self.select.callback = self._selected
+
+        container = Container(
+            TextDisplay(content="## 🚫 우선권 제거\n제거할 우선권 지역을 선택하세요."),
+            Separator(),
+            ActionRow(self.select),
+            accent_colour=Color.orange(),
+        )
+        self.add_item(container)
+
+    async def _selected(self, interaction: discord.Interaction) -> None:
+        await self.on_select(interaction, self.select.values[0])
 
 
 # 추첨 결과 공지 ------------------------------------------------------------

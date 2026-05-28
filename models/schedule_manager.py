@@ -16,6 +16,7 @@ from models.application import ApplicationStore
 from models.draw_orchestrator import DrawOrchestrator, DrawResult
 from models.draw_state import DrawState, DrawStatus
 from models.priority import PriorityStore
+from models.priority_audit import PriorityAuditStore
 from utils.time import KST, current_scrim_date, kst_at, now_kst
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class StateBundle:
     applications: ApplicationStore
     priorities: PriorityStore
     draw_state: DrawState
+    audit: PriorityAuditStore
 
 
 class ScheduleManager:
@@ -61,6 +63,7 @@ class ScheduleManager:
             applications=ApplicationStore.load(data_dir / "applications.json", scrim_date),
             priorities=PriorityStore.load(data_dir / "priorities.json"),
             draw_state=DrawState.load(data_dir / "draw_state.json", scrim_date),
+            audit=PriorityAuditStore.load(data_dir / "priority_audit.json"),
         )
 
         self._reset_task = tasks.loop(time=time(hour=21, minute=0, tzinfo=KST))(self._run_reset)
@@ -98,6 +101,7 @@ class ScheduleManager:
             self._reset_to(time_based)
         scrim_date = self._state.draw_state.scrim_date
         self._state.priorities.purge_outdated(scrim_date)
+        self._state.audit.purge_outdated(scrim_date)
 
         moment = now_kst()
         scrim_date_obj = date_cls.fromisoformat(scrim_date)
@@ -144,6 +148,7 @@ class ScheduleManager:
         logger.info("미진행 확정 → 즉시 D+1 리셋: %s → %s", current, next_date)
         self._reset_to(next_date)
         self._state.priorities.purge_outdated(next_date)
+        self._state.audit.purge_outdated(next_date)
 
     # 이벤트 트리거 ---------------------------------------------------------
     async def trigger_instant_draw_if_ready(self) -> None:
@@ -172,6 +177,7 @@ class ScheduleManager:
             logger.info("일일 리셋 실행 → %s", scrim_date)
             self._reset_to(scrim_date)
             self._state.priorities.purge_outdated(scrim_date)
+            self._state.audit.purge_outdated(scrim_date)
         await self.on_state_changed()
 
     async def _run_draw(self) -> None:
