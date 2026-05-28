@@ -13,12 +13,16 @@ from utils.time import iso_now
 
 logger = logging.getLogger(__name__)
 
+# 정확히 이 팀 수면 8팀 선정 대신 절반씩 두 중대로 나눠 전원 편성
+TWO_COMPANY_TEAMS = 14
+
 
 @dataclass
 class DrawResult:
     selected: list[Application]
     rejected: list[Application]
     granted_priority_regions: list[str]  # D+1 우선권 발급된 지역
+    groups: dict[str, list[Application]] | None = None  # 두 중대 모드(14·16팀): {"A": 1중대, "B": 2중대}
 
 
 class DrawOrchestrator:
@@ -86,35 +90,64 @@ class DrawOrchestrator:
     def _execute_draw(self) -> DrawResult:
         scrim_date = self.draw_state.scrim_date
         team_slots = self.team_slots
+        two_group_threshold = team_slots * 2  # 16
         active = self.applications.active()
 
-        # 우선권 자동 확정
+        # 우선권 자동 확정 (had_priority 갱신)
         priority_regions = self.priorities.regions_for(scrim_date)
         priority_apps = [a for a in active if a.region in priority_regions]
-        normal_apps = [a for a in active if a.region not in priority_regions]
-
-        # 우선권 표시 갱신 (had_priority)
         for app in priority_apps:
             app.had_priority = True
 
-        if len(priority_apps) >= team_slots:
-            selected = priority_apps[:team_slots]
-            extras = priority_apps[team_slots:] + normal_apps
-            rejected = extras
+        groups: dict[str, list[Application]] | None = None
+
+        if len(active) >= two_group_threshold:
+            # 16팀 이상 — 8/8 두 중대 랜덤 분할, 전원 선정
+            pool = list(active)
+            random.shuffle(pool)
+            group_a = pool[:team_slots]
+            group_b = pool[team_slots:two_group_threshold]
+            for a in group_a:
+                a.group = "A"
+            for a in group_b:
+                a.group = "B"
+            selected = group_a + group_b
+            rejected = pool[two_group_threshold:]  # 17+ 케이스 (이론상 발생 X)
+            groups = {"A": group_a, "B": group_b}
+        elif len(active) == TWO_COMPANY_TEAMS:
+            # 14팀 — 7/7 두 중대 랜덤 분할, 전원 선정 (탈락 없음)
+            pool = list(active)
+            random.shuffle(pool)
+            half = len(active) // 2
+            group_a = pool[:half]
+            group_b = pool[half:]
+            for a in group_a:
+                a.group = "A"
+            for a in group_b:
+                a.group = "B"
+            selected = group_a + group_b
+            rejected = []
+            groups = {"A": group_a, "B": group_b}
         else:
-            remaining_slots = team_slots - len(priority_apps)
-            random_pool = list(normal_apps)
-            random.shuffle(random_pool)
-            picked = random_pool[:remaining_slots]
-            not_picked = random_pool[remaining_slots:]
-            selected = priority_apps + picked
-            rejected = not_picked
+            normal_apps = [a for a in active if a.region not in priority_regions]
+            if len(priority_apps) >= team_slots:
+                selected = priority_apps[:team_slots]
+                rejected = priority_apps[team_slots:] + normal_apps
+            else:
+                remaining_slots = team_slots - len(priority_apps)
+                random_pool = list(normal_apps)
+                random.shuffle(random_pool)
+                picked = random_pool[:remaining_slots]
+                not_picked = random_pool[remaining_slots:]
+                selected = priority_apps + picked
+                rejected = not_picked
 
         self.applications.mark_status((a.team_id for a in selected), ApplicationStatus.SELECTED)
         self.applications.mark_status((a.team_id for a in rejected), ApplicationStatus.REJECTED)
 
         # 실제 신청·확정된 우선권만 소비 처리
-        for region in {a.region for a in priority_apps}:
+        applied_priority_regions = {a.region for a in selected if a.region in priority_regions}
+        for region in applied_priority_regions:
             self.priorities.consume(region, scrim_date)
 
         # 다음날(D+1) 우선권 발급 — 탈락 팀, 신청 시각 빠른 순 상위 8
@@ -130,15 +163,17 @@ class DrawOrchestrator:
         self.draw_state.save()
 
         logger.info(
-            "추첨 완료 scrim_date=%s selected=%d rejected=%d 우선권발급=%d",
+            "추첨 완료 scrim_date=%s selected=%d rejected=%d 우선권발급=%d groups=%s",
             scrim_date,
             len(selected),
             len(rejected),
             len(granted_regions),
+            "2" if groups else "1",
         )
 
         return DrawResult(
             selected=selected,
             rejected=rejected,
             granted_priority_regions=granted_regions,
+            groups=groups,
         )

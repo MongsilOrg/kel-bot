@@ -83,6 +83,27 @@ def _format_selected_lines(snapshot: DashboardSnapshot) -> str:
     return "\n".join(lines)
 
 
+def _format_group_lines(snapshot: DashboardSnapshot, group_label: str) -> str:
+    apps = [
+        a for a in snapshot.applications
+        if a.status is ApplicationStatus.SELECTED and a.group == group_label
+    ]
+    if not apps:
+        return "_없음_"
+    lines = []
+    for idx, app in enumerate(apps, start=1):
+        marker = "★ " if app.had_priority else "　 "
+        lines.append(f"`{idx:>2}.` {marker}{app.applicant_display}")
+    return "\n".join(lines)
+
+
+def _has_groups(snapshot: DashboardSnapshot) -> bool:
+    return any(
+        a.group for a in snapshot.applications
+        if a.status is ApplicationStatus.SELECTED
+    )
+
+
 def _format_rejected_lines(snapshot: DashboardSnapshot) -> str:
     apps = [a for a in snapshot.applications if a.status is ApplicationStatus.REJECTED]
     if not apps:
@@ -179,8 +200,16 @@ class DashboardView(LayoutView):
         ]
 
         if is_done:
-            selected = _format_selected_lines(snapshot)
-            children.append(TextDisplay(content=f"### 선정 8팀\n{selected}"))
+            if _has_groups(snapshot):
+                children.append(
+                    TextDisplay(content=f"### 1️⃣ 1중대\n{_format_group_lines(snapshot, 'A')}")
+                )
+                children.append(
+                    TextDisplay(content=f"### 2️⃣ 2중대\n{_format_group_lines(snapshot, 'B')}")
+                )
+            else:
+                selected = _format_selected_lines(snapshot)
+                children.append(TextDisplay(content=f"### 선정 8팀\n{selected}"))
             if any(a.status is ApplicationStatus.REJECTED for a in snapshot.applications):
                 rejected = _format_rejected_lines(snapshot)
                 children.append(TextDisplay(content=f"### 탈락 팀\n{rejected}"))

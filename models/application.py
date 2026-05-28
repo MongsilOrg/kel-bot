@@ -32,6 +32,7 @@ class Application:
     scrim_date: str
     had_priority: bool = False
     status: ApplicationStatus = ApplicationStatus.PENDING
+    group: str | None = None  # 두 중대 편성 시 "A"(1중대) / "B"(2중대)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -49,6 +50,7 @@ class Application:
             scrim_date=data["scrim_date"],
             had_priority=data.get("had_priority", False),
             status=ApplicationStatus(data.get("status", "pending")),
+            group=data.get("group"),
         )
 
 
