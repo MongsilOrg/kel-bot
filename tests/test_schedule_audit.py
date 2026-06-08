@@ -28,6 +28,7 @@ def _manager(tmp_path):
         on_draw=_noop,
         on_state_changed=_noop,
         on_deadline_cancelled=_noop,
+        on_reset=_noop,
     )
 
 
@@ -45,7 +46,6 @@ def test_daily_reset_purges_old_audit(tmp_path):
             actor_name="홍길동",
             removed_at="2020-01-01T00:00:00+09:00",
             scrim_date="2020-01-01",
-            was_self=False,
         )
     )
     asyncio.run(mgr._run_reset())

@@ -73,6 +73,21 @@ class DashboardController:
         view = self._build_dashboard_view()
         await message.edit(view=view, content=None)
 
+    async def recreate(self) -> None:
+        """기존 대시보드 메시지를 삭제하고 새 메시지로 다시 보낸다 (일일/조기 초기화 시)."""
+        channel = await fetch_text_channel(self.bot, self.settings.apply_channel_id)
+        old = self._dashboard_message
+        if old is not None:
+            try:
+                await old.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.warning("기존 대시보드 메시지 삭제 실패 — 무시하고 새로 전송")
+        view = self._build_dashboard_view()
+        message = await channel.send(view=view)
+        save_message_id(self._dashboard_path, message.id)
+        self._dashboard_message = message
+        logger.info("대시보드 메시지 재생성: %s", message.id)
+
     def _build_dashboard_view(self) -> DashboardView:
         snapshot = self._current_snapshot()
         return DashboardView(
@@ -100,6 +115,7 @@ class DashboardController:
             deadline_processed=state.draw_state.deadline_processed,
             application_open=application_open,
             removal_log=state.audit.entries_for(scrim_date),
+            can_remove_priority=bool(self._removable_priority()[1]),
         )
 
     def _is_application_window_open(self, scrim_date: str) -> bool:
@@ -207,40 +223,62 @@ class DashboardController:
         await self.refresh()
 
     # 우선권 제거 ----------------------------------------------------------
+    def _removable_priority(self) -> tuple[str, list[str]]:
+        """현재 제거 가능한 우선권의 대상 일자와 지역 목록.
+
+        추첨 후(DONE)엔 내일(D+1) 우선권, 그 외엔 오늘(D) 우선권을 대상으로 한다.
+        """
+        state = self.schedule.state
+        scrim_date = state.draw_state.scrim_date
+        if state.draw_state.status is DrawStatus.DONE:
+            target = (date_cls.fromisoformat(scrim_date) + timedelta(days=1)).isoformat()
+        else:
+            target = scrim_date
+        return target, sorted(state.priorities.regions_for(target))
+
     async def handle_remove_priority(self, interaction: discord.Interaction) -> None:
-        scrim_date = self.schedule.state.draw_state.scrim_date
-        regions = sorted(self.schedule.state.priorities.regions_for(scrim_date))
+        opened_target, regions = self._removable_priority()
         if not regions:
             await interaction.response.send_message(
                 view=info_view("현재 활성 우선권이 없습니다."),
                 ephemeral=True,
             )
             return
-        view = PriorityRemoveView(regions=regions, on_select=self._confirm_remove_priority)
+
+        # 패널 오픈 시점의 대상 일자를 캡처해 콜백까지 전달한다.
+        # 선택을 기다리는 사이 추첨/리셋으로 대상 일자가 바뀌면(엉뚱한 일자 무음 삭제 방지)
+        # 확정 단계에서 거부한다.
+        async def on_select(it: discord.Interaction, region: str) -> None:
+            await self._confirm_remove_priority(it, region, opened_target)
+
+        view = PriorityRemoveView(regions=regions, on_select=on_select)
         await interaction.response.send_message(view=view, ephemeral=True)
 
     async def _confirm_remove_priority(
-        self, interaction: discord.Interaction, region: str
+        self, interaction: discord.Interaction, region: str, opened_target: str
     ) -> None:
         async with self.schedule.lock:
             state = self.schedule.state
-            scrim_date = state.draw_state.scrim_date
-            if not state.priorities.revoke(region, scrim_date):
+            current_target, _ = self._removable_priority()
+            if current_target != opened_target:
+                await interaction.response.edit_message(
+                    view=info_view(
+                        "추첨이 진행되어 우선권 상태가 변경되었습니다.\n다시 시도해주세요."
+                    )
+                )
+                await self.refresh()
+                return
+            if not state.priorities.revoke(region, opened_target):
                 await interaction.response.edit_message(
                     view=info_view(f"`{region}` 우선권이 이미 없습니다.")
                 )
                 return
             display = getattr(interaction.user, "display_name", None) or interaction.user.name
-            try:
-                was_self = parse_nickname(display).region == region
-            except NicknameFormatError:
-                was_self = False
             state.audit.record(
                 region=region,
                 actor_id=str(interaction.user.id),
                 actor_name=display,
-                scrim_date=scrim_date,
-                was_self=was_self,
+                scrim_date=state.draw_state.scrim_date,
             )
         await interaction.response.edit_message(
             view=success_view(f"`{region}` 우선권을 제거했습니다."),

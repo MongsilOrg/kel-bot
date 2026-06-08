@@ -63,6 +63,7 @@ class DashboardSnapshot:
     deadline_processed: bool
     application_open: bool
     removal_log: List[RemovalEntry] = field(default_factory=list)
+    can_remove_priority: bool = False
 
 
 def _format_pending_lines(snapshot: DashboardSnapshot) -> str:
@@ -119,8 +120,7 @@ def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
     lines = []
     for e in entries:
         when = format_kst_short(e.removed_at) or e.removed_at
-        suffix = " (본인)" if e.was_self else ""
-        lines.append(f"`{when}` {e.region} · <@{e.actor_id}>{suffix}")
+        lines.append(f"`{when}` {e.region} · <@{e.actor_id}>")
     return "\n".join(lines)
 
 
@@ -201,7 +201,7 @@ class DashboardView(LayoutView):
             style=ButtonStyle.secondary,
             emoji="🚫",
             custom_id="kel:remove_priority",
-            disabled=window_closed,
+            disabled=not snapshot.can_remove_priority,
         )
         self.remove_priority_button.callback = self._on_remove_priority
 

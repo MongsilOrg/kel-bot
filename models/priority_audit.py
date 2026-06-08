@@ -15,7 +15,6 @@ class RemovalEntry:
     actor_name: str
     removed_at: str  # ISO8601
     scrim_date: str
-    was_self: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -28,7 +27,6 @@ class RemovalEntry:
             actor_name=data["actor_name"],
             removed_at=data["removed_at"],
             scrim_date=data["scrim_date"],
-            was_self=data.get("was_self", False),
         )
 
 
@@ -55,7 +53,6 @@ class PriorityAuditStore:
         actor_id: str,
         actor_name: str,
         scrim_date: str,
-        was_self: bool,
     ) -> RemovalEntry:
         entry = RemovalEntry(
             region=region,
@@ -63,7 +60,6 @@ class PriorityAuditStore:
             actor_name=actor_name,
             removed_at=iso_now(),
             scrim_date=scrim_date,
-            was_self=was_self,
         )
         self.entries.append(entry)
         self.save()

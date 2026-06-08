@@ -50,12 +50,14 @@ class ScheduleManager:
         on_draw: DrawCallback,
         on_state_changed: SimpleCallback,
         on_deadline_cancelled: SimpleCallback,
+        on_reset: SimpleCallback,
     ) -> None:
         self.settings = settings
         self.data_dir = data_dir
         self.on_draw = on_draw
         self.on_state_changed = on_state_changed
         self.on_deadline_cancelled = on_deadline_cancelled
+        self.on_reset = on_reset
 
         self._lock = asyncio.Lock()
         scrim_date = current_scrim_date(self.settings.reset_hour).isoformat()
@@ -178,7 +180,8 @@ class ScheduleManager:
             self._reset_to(scrim_date)
             self._state.priorities.purge_outdated(scrim_date)
             self._state.audit.purge_outdated(scrim_date)
-        await self.on_state_changed()
+        # 일일 초기화 → 대시보드 메시지 재생성 (기존 삭제 후 새로 전송)
+        await self.on_reset()
 
     async def _run_draw(self) -> None:
         async with self._lock:
@@ -194,5 +197,7 @@ class ScheduleManager:
             if cancelled:
                 self._early_reset_to_next_day()
         if cancelled:
-            await self.on_deadline_cancelled()
-        await self.on_state_changed()
+            # 17:00 미추첨 취소 → 조기 초기화 → 대시보드 메시지 재생성
+            await self.on_reset()
+        else:
+            await self.on_state_changed()

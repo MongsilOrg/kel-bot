@@ -3,14 +3,13 @@ from models.priority_audit import PriorityAuditStore, RemovalEntry
 DATE = "2026-05-30"
 
 
-def _entry(region, at, date=DATE, was_self=False):
+def _entry(region, at, date=DATE):
     return RemovalEntry(
         region=region,
         actor_id="1",
         actor_name="홍길동",
         removed_at=at,
         scrim_date=date,
-        was_self=was_self,
     )
 
 
@@ -18,7 +17,7 @@ def test_record_appends_and_persists(tmp_path):
     path = tmp_path / "audit.json"
     store = PriorityAuditStore.load(path)
     entry = store.record(
-        region="광주", actor_id="42", actor_name="운영자", scrim_date=DATE, was_self=False
+        region="광주", actor_id="42", actor_name="운영자", scrim_date=DATE
     )
     assert entry.region == "광주"
     assert [e.region for e in store.entries_for(DATE)] == ["광주"]
@@ -53,11 +52,3 @@ def test_purge_outdated_drops_old(tmp_path):
     )
     store.purge_outdated(DATE)
     assert [e.region for e in store.entries] == ["부산"]
-
-
-def test_was_self_roundtrip(tmp_path):
-    path = tmp_path / "a.json"
-    store = PriorityAuditStore.load(path)
-    store.record(region="광주", actor_id="1", actor_name="홍길동", scrim_date=DATE, was_self=True)
-    reloaded = PriorityAuditStore.load(path)
-    assert reloaded.entries_for(DATE)[0].was_self is True

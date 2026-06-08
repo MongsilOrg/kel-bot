@@ -41,12 +41,17 @@ class KelBot(commands.Bot):
             if self.dashboard is not None:
                 await self.dashboard.announce_deadline_cancelled()
 
+        async def on_reset():
+            if self.dashboard is not None:
+                await self.dashboard.recreate()
+
         self.schedule = ScheduleManager(
             settings=self.settings,
             data_dir=self.settings.data_dir,
             on_draw=on_draw,
             on_state_changed=on_state_changed,
             on_deadline_cancelled=on_deadline_cancelled,
+            on_reset=on_reset,
         )
         self.dashboard = DashboardController(self, self.settings, self.schedule)
         # tasks.loop는 client loop이 준비된 시점에 start 해야 함 → on_ready에서
