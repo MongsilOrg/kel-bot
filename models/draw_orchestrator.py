@@ -13,7 +13,7 @@ from utils.time import iso_now
 
 logger = logging.getLogger(__name__)
 
-# 정확히 이 팀 수면 8팀 선정 대신 절반씩 두 중대로 나눠 전원 편성
+# 이 팀 수 이상이면 8팀 선정 대신 두 중대로 나눠 전원 편성 (14→7/7, 15→8/7, 16→8/8)
 TWO_COMPANY_TEAMS = 14
 
 
@@ -101,32 +101,22 @@ class DrawOrchestrator:
 
         groups: dict[str, list[Application]] | None = None
 
-        if len(active) >= two_group_threshold:
-            # 16팀 이상 — 8/8 두 중대 랜덤 분할, 전원 선정
+        if len(active) >= TWO_COMPANY_TEAMS:
+            # 14팀 이상 — 두 중대 랜덤 분할, 전원 선정 (탈락 없음, 우선권 미발급).
+            # 1중대는 올림(많은 쪽), 2중대는 나머지. 정원 초과분(17+, 이론상 X)만 탈락.
+            #   14→7/7, 15→8/7, 16→8/8
             pool = list(active)
             random.shuffle(pool)
-            group_a = pool[:team_slots]
-            group_b = pool[team_slots:two_group_threshold]
+            seated = pool[:two_group_threshold]  # 최대 16명 착석
+            a_size = min(team_slots, (len(seated) + 1) // 2)
+            group_a = seated[:a_size]
+            group_b = seated[a_size:]
             for a in group_a:
                 a.group = "A"
             for a in group_b:
                 a.group = "B"
             selected = group_a + group_b
             rejected = pool[two_group_threshold:]  # 17+ 케이스 (이론상 발생 X)
-            groups = {"A": group_a, "B": group_b}
-        elif len(active) == TWO_COMPANY_TEAMS:
-            # 14팀 — 7/7 두 중대 랜덤 분할, 전원 선정 (탈락 없음)
-            pool = list(active)
-            random.shuffle(pool)
-            half = len(active) // 2
-            group_a = pool[:half]
-            group_b = pool[half:]
-            for a in group_a:
-                a.group = "A"
-            for a in group_b:
-                a.group = "B"
-            selected = group_a + group_b
-            rejected = []
             groups = {"A": group_a, "B": group_b}
         else:
             normal_apps = [a for a in active if a.region not in priority_regions]
