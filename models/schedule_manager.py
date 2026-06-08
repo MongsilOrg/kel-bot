@@ -133,15 +133,19 @@ class ScheduleManager:
         ):
             self._early_reset_to_next_day()
 
-    def _reset_to(self, scrim_date: str) -> None:
-        """주어진 scrim_date로 application/draw_state 리셋. 같은 일자면 no-op."""
+    def _reset_to(self, scrim_date: str) -> bool:
+        """주어진 scrim_date로 application/draw_state 리셋. 같은 일자면 no-op.
+
+        실제로 초기화했으면 True, 이미 같은 일자라 no-op이면 False를 반환한다.
+        """
         if (
             self._state.applications.scrim_date == scrim_date
             and self._state.draw_state.scrim_date == scrim_date
         ):
-            return
+            return False
         self._state.applications.reset(scrim_date)
         self._state.draw_state.reset(scrim_date)
+        return True
 
     def _early_reset_to_next_day(self) -> None:
         """미진행 확정(17:00) 직후 D+1로 즉시 전환."""
@@ -176,12 +180,16 @@ class ScheduleManager:
     async def _run_reset(self) -> None:
         async with self._lock:
             scrim_date = current_scrim_date(self.settings.reset_hour).isoformat()
-            logger.info("일일 리셋 실행 → %s", scrim_date)
-            self._reset_to(scrim_date)
+            changed = self._reset_to(scrim_date)
             self._state.priorities.purge_outdated(scrim_date)
             self._state.audit.purge_outdated(scrim_date)
-        # 일일 초기화 → 대시보드 메시지 재생성 (기존 삭제 후 새로 전송)
-        await self.on_reset()
+            if changed:
+                logger.info("일일 리셋 실행 → %s", scrim_date)
+            else:
+                logger.info("일일 리셋 시각 — 이미 %s로 초기화됨(조기초기화), 스킵", scrim_date)
+        # 실제 초기화된 경우에만 대시보드 메시지 재생성 (조기초기화로 no-op이면 스킵)
+        if changed:
+            await self.on_reset()
 
     async def _run_draw(self) -> None:
         async with self._lock:

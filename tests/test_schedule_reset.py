@@ -40,6 +40,10 @@ def _manager(tmp_path, calls):
 def test_daily_reset_calls_on_reset(tmp_path):
     calls = []
     mgr = _manager(tmp_path, calls)
+    # 과거 일자로 맞춰 실제 리셋이 일어나도록 함
+    mgr.state.applications.reset("2020-01-01")
+    mgr.state.draw_state.reset("2020-01-01")
+    calls.clear()
     asyncio.run(mgr._run_reset())
     assert "reset" in calls
     assert "state" not in calls  # 일반 갱신이 아니라 재생성 경로
@@ -60,3 +64,31 @@ def test_deadline_after_draw_does_not_recreate(tmp_path):
     asyncio.run(mgr._run_deadline())
     assert "reset" not in calls
     assert "state" in calls
+
+
+def test_reset_noop_skips_recreate(tmp_path):
+    """이미 대상 일자로 초기화돼 있으면(예: 17시 조기초기화 후) 21시 _run_reset은
+    데이터·메시지 모두 스킵한다."""
+    calls = []
+    mgr = _manager(tmp_path, calls)
+    # 현재 표시 일자를 21시 리셋이 도달할 일자와 동일하게 미리 맞춰 no-op 유도
+    from utils.time import current_scrim_date
+
+    target = current_scrim_date(mgr.settings.reset_hour).isoformat()
+    mgr.state.applications.reset(target)
+    mgr.state.draw_state.reset(target)
+    calls.clear()
+    asyncio.run(mgr._run_reset())
+    assert "reset" not in calls  # no-op → 메시지 재생성 스킵
+
+
+def test_reset_actual_change_recreates(tmp_path):
+    """실제로 새 일자로 초기화되면 메시지를 재생성한다(정상 21시 흐름)."""
+    calls = []
+    mgr = _manager(tmp_path, calls)
+    # 과거 일자로 맞춰두면 21시 리셋이 실제로 일자를 바꾼다
+    mgr.state.applications.reset("2020-01-01")
+    mgr.state.draw_state.reset("2020-01-01")
+    calls.clear()
+    asyncio.run(mgr._run_reset())
+    assert "reset" in calls
