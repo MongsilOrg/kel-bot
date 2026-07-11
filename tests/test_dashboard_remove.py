@@ -128,12 +128,83 @@ def test_confirm_remove_revokes_and_logs(tmp_path):
     assert entries[0].actor_id == "1"
 
 
-def test_handle_remove_no_priority(tmp_path):
+def test_handle_manage_shows_panel(tmp_path):
+    # 활성 우선권이 없어도 관리 패널(추가 버튼 포함)은 항상 뜬다.
     ctrl, mgr = _controller(tmp_path)
     it = _Interaction(1, "광주) 홍길동")
-    asyncio.run(ctrl.handle_remove_priority(it))
+    asyncio.run(ctrl.handle_manage_priority(it))
     assert it.response.sent is not None
     assert it.response.sent["ephemeral"] is True
+
+
+def test_confirm_add_grants_and_logs(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    it = _Interaction(7, "서울) 운영자")
+    asyncio.run(ctrl._confirm_add_priority(it, "광주", d))
+    assert mgr.state.priorities.regions_for(d) == {"광주"}
+    entries = mgr.state.audit.entries_for(d)
+    assert len(entries) == 1
+    assert entries[0].region == "광주"
+    assert entries[0].action == "grant"
+    assert entries[0].actor_id == "7"
+
+
+def test_confirm_add_strips_region(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    it = _Interaction(7, "서울) 운영자")
+    asyncio.run(ctrl._confirm_add_priority(it, "  광주  ", d))
+    assert mgr.state.priorities.regions_for(d) == {"광주"}
+
+
+def test_confirm_add_empty_region_noop(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    it = _Interaction(7, "서울) 운영자")
+    asyncio.run(ctrl._confirm_add_priority(it, "   ", d))
+    assert mgr.state.priorities.regions_for(d) == set()
+    assert it.response.sent is not None  # 안내 메시지
+
+
+def test_confirm_add_duplicate_noop(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    mgr.state.priorities.grant(["광주"], d, slot_cap=8)
+    it = _Interaction(7, "서울) 운영자")
+    asyncio.run(ctrl._confirm_add_priority(it, "광주", d))
+    assert mgr.state.priorities.regions_for(d) == {"광주"}          # 중복 없음
+    assert [e for e in mgr.state.audit.entries_for(d) if e.action == "grant"] == []
+    assert it.response.sent is not None                             # 이미 있음 안내
+
+
+def test_target_label_today(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    dd = date_cls.fromisoformat(d)
+    assert ctrl._target_label(d) == f"{dd.month}/{dd.day}(오늘)"
+
+
+def test_target_label_tomorrow(tmp_path):
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    nxt = _next(d)
+    dd = date_cls.fromisoformat(nxt)
+    assert ctrl._target_label(nxt) == f"{dd.month}/{dd.day}(내일)"
+
+
+def test_confirm_add_rejects_when_target_changed_by_draw(tmp_path):
+    """패널을 D(오늘) 기준으로 연 뒤 추첨이 발생해 대상이 D+1로 바뀌면 추가를 거부한다."""
+    ctrl, mgr = _controller(tmp_path)
+    d = mgr.state.draw_state.scrim_date
+    nxt = _next(d)
+    # 오픈 시점: PENDING(target=D). 그 사이 추첨 발생 → DONE(target=D+1)
+    mgr.state.draw_state.status = DrawStatus.DONE
+    it = _Interaction(1, "광주) 홍길동")
+    asyncio.run(ctrl._confirm_add_priority(it, "광주", d))  # opened_target=d(과거)
+    assert mgr.state.priorities.regions_for(d) == set()
+    assert mgr.state.priorities.regions_for(nxt) == set()
+    assert mgr.state.audit.entries_for(d) == []
 
 
 def test_removable_target_pending(tmp_path):

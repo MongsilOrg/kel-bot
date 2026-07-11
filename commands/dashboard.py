@@ -12,7 +12,8 @@ from commands.ui.views import (
     CancelConfirmView,
     DashboardSnapshot,
     DashboardView,
-    PriorityRemoveView,
+    PriorityAddModal,
+    PriorityManageView,
 )
 from config.settings import Settings
 from models.application import ApplicationError
@@ -94,7 +95,7 @@ class DashboardController:
             snapshot=snapshot,
             apply_handler=self.handle_apply,
             cancel_handler=self.handle_cancel,
-            remove_priority_handler=self.handle_remove_priority,
+            manage_priority_handler=self.handle_manage_priority,
         )
 
     def _current_snapshot(self) -> DashboardSnapshot:
@@ -115,7 +116,6 @@ class DashboardController:
             deadline_processed=state.draw_state.deadline_processed,
             application_open=application_open,
             removal_log=state.audit.entries_for(scrim_date),
-            can_remove_priority=bool(self._removable_priority()[1]),
         )
 
     def _is_application_window_open(self, scrim_date: str) -> bool:
@@ -171,6 +171,13 @@ class DashboardController:
                 )
                 return
 
+        logger.info(
+            "신청 · %s · %s(%s)%s",
+            parsed.region,
+            display_name,
+            member.id,
+            " [우선권]" if had_priority else "",
+        )
         if had_priority:
             body = f"`{parsed.region}` 신청 완료\n우선권이 적용되었습니다."
         else:
@@ -217,12 +224,14 @@ class DashboardController:
             except ApplicationError as exc:
                 await interaction.response.edit_message(view=info_view(str(exc)))
                 return
+        display = getattr(interaction.user, "display_name", None) or interaction.user.name
+        logger.info("취소 · %s · %s(%s)", app.region, display, interaction.user.id)
         await interaction.response.edit_message(
             view=success_view(f"`{app.region}` 신청을 취소했습니다."),
         )
         await self.refresh()
 
-    # 우선권 제거 ----------------------------------------------------------
+    # 우선권 관리 ----------------------------------------------------------
     def _removable_priority(self) -> tuple[str, list[str]]:
         """현재 제거 가능한 우선권의 대상 일자와 지역 목록.
 
@@ -236,23 +245,87 @@ class DashboardController:
             target = scrim_date
         return target, sorted(state.priorities.regions_for(target))
 
-    async def handle_remove_priority(self, interaction: discord.Interaction) -> None:
+    async def handle_manage_priority(self, interaction: discord.Interaction) -> None:
+        # 패널 오픈 시점의 대상 일자를 캡처해 콜백까지 전달한다.
+        # 선택/입력을 기다리는 사이 추첨·리셋으로 대상 일자가 바뀌면(엉뚱한 일자 반영 방지)
+        # 확정 단계에서 거부한다.
         opened_target, regions = self._removable_priority()
-        if not regions:
+        target_label = self._target_label(opened_target)
+
+        async def on_add(it: discord.Interaction) -> None:
+            await self._open_add_modal(it, opened_target)
+
+        async def on_remove_select(it: discord.Interaction, region: str) -> None:
+            await self._confirm_remove_priority(it, region, opened_target)
+
+        view = PriorityManageView(
+            target_label=target_label,
+            removable_regions=regions,
+            on_add=on_add,
+            on_remove_select=on_remove_select,
+        )
+        await interaction.response.send_message(view=view, ephemeral=True)
+
+    def _target_label(self, target: str) -> str:
+        """관리 패널 헤더용 대상 일자 라벨 — 예 `7/12(오늘)`."""
+        scrim_date = self.schedule.state.draw_state.scrim_date
+        d = date_cls.fromisoformat(target)
+        when = "오늘" if target == scrim_date else "내일"
+        return f"{d.month}/{d.day}({when})"
+
+    async def _open_add_modal(self, interaction: discord.Interaction, opened_target: str) -> None:
+        async def on_submit_region(it: discord.Interaction, raw_region: str) -> None:
+            await self._confirm_add_priority(it, raw_region, opened_target)
+
+        await interaction.response.send_modal(
+            PriorityAddModal(on_submit_region=on_submit_region)
+        )
+
+    async def _confirm_add_priority(
+        self, interaction: discord.Interaction, raw_region: str, opened_target: str
+    ) -> None:
+        region = raw_region.strip()
+        if not region:
             await interaction.response.send_message(
-                view=info_view("현재 활성 우선권이 없습니다."),
+                view=info_view("지역명을 입력해주세요."),
                 ephemeral=True,
             )
             return
-
-        # 패널 오픈 시점의 대상 일자를 캡처해 콜백까지 전달한다.
-        # 선택을 기다리는 사이 추첨/리셋으로 대상 일자가 바뀌면(엉뚱한 일자 무음 삭제 방지)
-        # 확정 단계에서 거부한다.
-        async def on_select(it: discord.Interaction, region: str) -> None:
-            await self._confirm_remove_priority(it, region, opened_target)
-
-        view = PriorityRemoveView(regions=regions, on_select=on_select)
-        await interaction.response.send_message(view=view, ephemeral=True)
+        async with self.schedule.lock:
+            state = self.schedule.state
+            current_target, _ = self._removable_priority()
+            if current_target != opened_target:
+                await interaction.response.send_message(
+                    view=info_view(
+                        "추첨이 진행되어 우선권 상태가 변경되었습니다.\n다시 시도해주세요."
+                    ),
+                    ephemeral=True,
+                )
+                await self.refresh()
+                return
+            if not state.priorities.grant_one(region, opened_target):
+                await interaction.response.send_message(
+                    view=info_view(f"`{region}` 우선권이 이미 있습니다."),
+                    ephemeral=True,
+                )
+                return
+            display = getattr(interaction.user, "display_name", None) or interaction.user.name
+            state.audit.record(
+                region=region,
+                actor_id=str(interaction.user.id),
+                actor_name=display,
+                scrim_date=state.draw_state.scrim_date,
+                action="grant",
+            )
+        logger.info(
+            "우선권 부여 · %s · %s(%s) · 대상 %s",
+            region, display, interaction.user.id, opened_target,
+        )
+        await interaction.response.send_message(
+            view=success_view(f"`{region}` 우선권을 추가했습니다."),
+            ephemeral=True,
+        )
+        await self.refresh()
 
     async def _confirm_remove_priority(
         self, interaction: discord.Interaction, region: str, opened_target: str
@@ -279,7 +352,12 @@ class DashboardController:
                 actor_id=str(interaction.user.id),
                 actor_name=display,
                 scrim_date=state.draw_state.scrim_date,
+                action="revoke",
             )
+        logger.info(
+            "우선권 제거 · %s · %s(%s) · 대상 %s",
+            region, display, interaction.user.id, opened_target,
+        )
         await interaction.response.edit_message(
             view=success_view(f"`{region}` 우선권을 제거했습니다."),
         )

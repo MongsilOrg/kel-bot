@@ -9,7 +9,17 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 import discord
 from discord import ButtonStyle, Color
-from discord.ui import ActionRow, Button, Container, LayoutView, Select, Separator, TextDisplay
+from discord.ui import (
+    ActionRow,
+    Button,
+    Container,
+    LayoutView,
+    Modal,
+    Select,
+    Separator,
+    TextDisplay,
+    TextInput,
+)
 
 from commands.ui.layout_helpers import (
     FOOTER_TEXT,
@@ -27,8 +37,9 @@ logger = logging.getLogger(__name__)
 
 ApplyHandler = Callable[[discord.Interaction], Awaitable[None]]
 CancelHandler = Callable[[discord.Interaction], Awaitable[None]]
-RemovePriorityHandler = Callable[[discord.Interaction], Awaitable[None]]
+ManagePriorityHandler = Callable[[discord.Interaction], Awaitable[None]]
 RemoveSelectHandler = Callable[[discord.Interaction, str], Awaitable[None]]
+AddSubmitHandler = Callable[[discord.Interaction, str], Awaitable[None]]
 
 
 # 버튼 쿨다운 ---------------------------------------------------------------
@@ -63,7 +74,6 @@ class DashboardSnapshot:
     deadline_processed: bool
     application_open: bool
     removal_log: List[RemovalEntry] = field(default_factory=list)
-    can_remove_priority: bool = False
 
 
 def _format_pending_lines(snapshot: DashboardSnapshot) -> str:
@@ -120,7 +130,8 @@ def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
     lines = []
     for e in entries:
         when = format_kst_short(e.removed_at) or e.removed_at
-        lines.append(f"`{when}` {e.region} · <@{e.actor_id}>")
+        mark = "➕" if getattr(e, "action", "revoke") == "grant" else "➖"
+        lines.append(f"`{when}` {mark} {e.region} · <@{e.actor_id}>")
     return "\n".join(lines)
 
 
@@ -171,13 +182,13 @@ class DashboardView(LayoutView):
         snapshot: DashboardSnapshot,
         apply_handler: ApplyHandler,
         cancel_handler: CancelHandler,
-        remove_priority_handler: RemovePriorityHandler,
+        manage_priority_handler: ManagePriorityHandler,
     ) -> None:
         super().__init__(timeout=None)
         self.snapshot = snapshot
         self.apply_handler = apply_handler
         self.cancel_handler = cancel_handler
-        self.remove_priority_handler = remove_priority_handler
+        self.manage_priority_handler = manage_priority_handler
 
         window_closed = not snapshot.application_open
         self.apply_button = Button(
@@ -196,14 +207,13 @@ class DashboardView(LayoutView):
             disabled=window_closed,
         )
         self.cancel_button.callback = self._on_cancel
-        self.remove_priority_button = Button(
-            label="우선권 제거",
+        self.priority_button = Button(
+            label="우선권",
             style=ButtonStyle.secondary,
-            emoji="🚫",
-            custom_id="kel:remove_priority",
-            disabled=not snapshot.can_remove_priority,
+            emoji="⭐",
+            custom_id="kel:priority",
         )
-        self.remove_priority_button.callback = self._on_remove_priority
+        self.priority_button.callback = self._on_priority
 
         title = _format_scrim_title(snapshot.scrim_date)
         status_label = _draw_status_label(snapshot)
@@ -247,12 +257,12 @@ class DashboardView(LayoutView):
             children.append(Separator())
             children.append(
                 TextDisplay(
-                    content=f"### 우선권 제거 로그\n{_format_removal_log_lines(snapshot.removal_log)}"
+                    content=f"### 우선권 변경 로그\n{_format_removal_log_lines(snapshot.removal_log)}"
                 )
             )
 
         children.append(
-            ActionRow(self.apply_button, self.cancel_button, self.remove_priority_button)
+            ActionRow(self.apply_button, self.cancel_button, self.priority_button)
         )
         children.append(
             TextDisplay(
@@ -299,7 +309,7 @@ class DashboardView(LayoutView):
                     ephemeral=True,
                 )
 
-    async def _on_remove_priority(self, interaction: discord.Interaction) -> None:
+    async def _on_priority(self, interaction: discord.Interaction) -> None:
         if not check_cooldown(interaction.user.id):
             await interaction.response.send_message(
                 view=info_view("잠시 후 다시 시도해주세요."),
@@ -307,9 +317,9 @@ class DashboardView(LayoutView):
             )
             return
         try:
-            await self.remove_priority_handler(interaction)
+            await self.manage_priority_handler(interaction)
         except Exception:  # noqa: BLE001
-            logger.exception("remove_priority_handler 예외")
+            logger.exception("manage_priority_handler 예외")
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     view=error_view("처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요."),
@@ -366,31 +376,76 @@ class CancelConfirmView(LayoutView):
         )
 
 
-# 우선권 제거 ---------------------------------------------------------------
-class PriorityRemoveView(LayoutView):
-    """우선권 제거 지역 선택 LayoutView (ephemeral)."""
+# 우선권 관리 ---------------------------------------------------------------
+class PriorityManageView(LayoutView):
+    """우선권 관리 패널 (ephemeral): 추가 버튼 + 제거 지역 Select."""
 
-    def __init__(self, regions: List[str], on_select: RemoveSelectHandler) -> None:
+    def __init__(
+        self,
+        *,
+        target_label: str,
+        removable_regions: List[str],
+        on_add: ManagePriorityHandler,
+        on_remove_select: RemoveSelectHandler,
+    ) -> None:
         super().__init__(timeout=60)
-        self.on_select = on_select
-        self.select = Select(
-            placeholder="제거할 우선권 지역 선택",
-            min_values=1,
-            max_values=1,
-            options=[discord.SelectOption(label=r, value=r) for r in regions],
-        )
-        self.select.callback = self._selected
+        self.on_add = on_add
+        self.on_remove_select = on_remove_select
 
-        container = Container(
-            TextDisplay(content="## 🚫 우선권 제거\n제거할 우선권 지역을 선택하세요."),
+        self.add_button = Button(
+            label="추가",
+            style=ButtonStyle.success,
+            emoji="➕",
+        )
+        self.add_button.callback = self._on_add
+
+        current = ", ".join(removable_regions) if removable_regions else "없음"
+        children = [
+            TextDisplay(content=f"## ⭐ 우선권 · {target_label}\n현재 {current}"),
             Separator(),
-            ActionRow(self.select),
-            accent_colour=Color.orange(),
-        )
-        self.add_item(container)
+            ActionRow(self.add_button),
+        ]
+        if removable_regions:
+            self.select: Optional[Select] = Select(
+                placeholder="제거할 지역",
+                min_values=1,
+                max_values=1,
+                options=[discord.SelectOption(label=r, value=r) for r in removable_regions],
+            )
+            self.select.callback = self._on_remove
+            children.append(ActionRow(self.select))
+        else:
+            self.select = None
+            children.append(TextDisplay(content="-# 제거할 우선권 없음"))
 
-    async def _selected(self, interaction: discord.Interaction) -> None:
-        await self.on_select(interaction, self.select.values[0])
+        self.add_item(Container(*children, accent_colour=Color.blurple()))
+
+    async def _on_add(self, interaction: discord.Interaction) -> None:
+        await self.on_add(interaction)
+
+    async def _on_remove(self, interaction: discord.Interaction) -> None:
+        assert self.select is not None
+        await self.on_remove_select(interaction, self.select.values[0])
+
+
+# 우선권 추가 모달 ----------------------------------------------------------
+class PriorityAddModal(Modal):
+    """우선권 추가 지역 입력 모달 (ephemeral)."""
+
+    def __init__(self, on_submit_region: AddSubmitHandler) -> None:
+        super().__init__(title="우선권 추가")
+        self.on_submit_region = on_submit_region
+        self.region_input = TextInput(
+            label="지역",
+            placeholder="예: 광주",
+            min_length=2,
+            max_length=2,
+            required=True,
+        )
+        self.add_item(self.region_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.on_submit_region(interaction, self.region_input.value)
 
 
 # 추첨 결과 공지 ------------------------------------------------------------
