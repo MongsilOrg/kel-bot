@@ -52,3 +52,33 @@ def test_purge_outdated_drops_old(tmp_path):
     )
     store.purge_outdated(DATE)
     assert [e.region for e in store.entries] == ["부산"]
+
+
+def test_record_defaults_to_revoke(tmp_path):
+    store = PriorityAuditStore.load(tmp_path / "a.json")
+    entry = store.record(region="광주", actor_id="1", actor_name="운영자", scrim_date=DATE)
+    assert entry.action == "revoke"
+
+
+def test_record_grant_action_persists(tmp_path):
+    path = tmp_path / "a.json"
+    store = PriorityAuditStore.load(path)
+    store.record(
+        region="광주", actor_id="1", actor_name="운영자", scrim_date=DATE, action="grant"
+    )
+    reloaded = PriorityAuditStore.load(path)
+    assert reloaded.entries_for(DATE)[0].action == "grant"
+
+
+def test_from_dict_defaults_action_for_legacy(tmp_path):
+    # 구버전 로그(action 필드 없음)는 제거로 간주
+    e = RemovalEntry.from_dict(
+        {
+            "region": "광주",
+            "actor_id": "1",
+            "actor_name": "홍길동",
+            "removed_at": "2026-05-30T00:00:00+09:00",
+            "scrim_date": DATE,
+        }
+    )
+    assert e.action == "revoke"

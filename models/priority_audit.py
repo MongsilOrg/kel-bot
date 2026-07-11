@@ -1,4 +1,4 @@
-"""우선권 제거 로그 — 당일 이력 영속화."""
+"""우선권 변경 로그(부여/제거) — 당일 이력 영속화."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -13,8 +13,9 @@ class RemovalEntry:
     region: str
     actor_id: str
     actor_name: str
-    removed_at: str  # ISO8601
+    removed_at: str  # ISO8601 — 이벤트 발생 시각
     scrim_date: str
+    action: str = "revoke"  # "grant"(부여) | "revoke"(제거)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -27,6 +28,7 @@ class RemovalEntry:
             actor_name=data["actor_name"],
             removed_at=data["removed_at"],
             scrim_date=data["scrim_date"],
+            action=data.get("action", "revoke"),  # 구버전 로그는 제거로 간주
         )
 
 
@@ -53,6 +55,7 @@ class PriorityAuditStore:
         actor_id: str,
         actor_name: str,
         scrim_date: str,
+        action: str = "revoke",
     ) -> RemovalEntry:
         entry = RemovalEntry(
             region=region,
@@ -60,6 +63,7 @@ class PriorityAuditStore:
             actor_name=actor_name,
             removed_at=iso_now(),
             scrim_date=scrim_date,
+            action=action,
         )
         self.entries.append(entry)
         self.save()
