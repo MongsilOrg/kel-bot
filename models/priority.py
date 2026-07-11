@@ -72,6 +72,21 @@ class PriorityStore:
         self.save()
         return granted
 
+    def grant_one(self, region: str, valid_for_date: str) -> bool:
+        """단일 지역 수동 우선권 발급(정원 무관). 이미 활성이면 False."""
+        if self.has(region, valid_for_date):
+            return False
+        self.priorities.append(
+            Priority(
+                region=region,
+                granted_at=iso_now(),
+                valid_for_date=valid_for_date,
+                consumed=False,
+            )
+        )
+        self.save()
+        return True
+
     def consume(self, region: str, valid_for_date: str) -> None:
         for p in self.priorities:
             if p.region == region and p.valid_for_date == valid_for_date and not p.consumed:

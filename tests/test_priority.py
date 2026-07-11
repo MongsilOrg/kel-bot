@@ -38,3 +38,31 @@ def test_revoke_scoped_to_date(tmp_path):
     store = _store(tmp_path, [_p("광주", date=other)])
     assert store.revoke("광주", DATE) is False
     assert store.regions_for(other) == {"광주"}
+
+
+def test_grant_one_adds_active_priority(tmp_path):
+    store = _store(tmp_path, [])
+    assert store.grant_one("광주", DATE) is True
+    assert store.regions_for(DATE) == {"광주"}
+
+
+def test_grant_one_rejects_duplicate_active(tmp_path):
+    store = _store(tmp_path, [_p("광주")])
+    assert store.grant_one("광주", DATE) is False
+    assert store.regions_for(DATE) == {"광주"}
+
+
+def test_grant_one_scoped_to_date(tmp_path):
+    other = "2026-05-31"
+    store = _store(tmp_path, [_p("광주", date=other)])
+    # 다른 날짜엔 활성 우선권이 없으므로 발급 성공
+    assert store.grant_one("광주", DATE) is True
+    assert store.regions_for(DATE) == {"광주"}
+    assert store.regions_for(other) == {"광주"}
+
+
+def test_grant_one_readds_after_consumed(tmp_path):
+    # 이미 소비된 우선권이 있어도 활성으로 재발급 가능
+    store = _store(tmp_path, [_p("광주", consumed=True)])
+    assert store.grant_one("광주", DATE) is True
+    assert store.regions_for(DATE) == {"광주"}
