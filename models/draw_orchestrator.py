@@ -111,10 +111,13 @@ class DrawOrchestrator:
             a_size = min(team_slots, (len(seated) + 1) // 2)
             group_a = seated[:a_size]
             group_b = seated[a_size:]
-            for a in group_a:
+            # seated가 이미 셔플됨 → 조 내 순서(draw_order)도 무작위. 표시 순서로 고정.
+            for i, a in enumerate(group_a):
                 a.group = "A"
-            for a in group_b:
+                a.draw_order = i
+            for i, a in enumerate(group_b):
                 a.group = "B"
+                a.draw_order = i
             selected = group_a + group_b
             rejected = pool[two_group_threshold:]  # 17+ 케이스 (이론상 발생 X)
             groups = {"A": group_a, "B": group_b}
@@ -131,6 +134,11 @@ class DrawOrchestrator:
                 not_picked = random_pool[remaining_slots:]
                 selected = priority_apps + picked
                 rejected = not_picked
+            # 1개조(단일 8팀) 모드 — 선정 팀 표시 순서(번호)도 무작위로 고정
+            draw_seq = list(selected)
+            random.shuffle(draw_seq)
+            for i, a in enumerate(draw_seq):
+                a.draw_order = i
 
         self.applications.mark_status((a.team_id for a in selected), ApplicationStatus.SELECTED)
         self.applications.mark_status((a.team_id for a in rejected), ApplicationStatus.REJECTED)

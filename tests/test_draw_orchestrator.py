@@ -80,3 +80,62 @@ def test_8_teams_single_no_reject(tmp_path):
     assert res.groups is None
     assert len(res.selected) == 8
     assert len(res.rejected) == 0
+
+
+def test_group_draw_order_is_consecutive_permutation(tmp_path):
+    """조 내 draw_order는 0..n-1 연속이며, 그 순서 = 셔플된 조 배정 순서(표시 순서)."""
+    res = _run(tmp_path, 15)
+    for label in ("A", "B"):
+        members = res.groups[label]
+        assert sorted(a.draw_order for a in members) == list(range(len(members)))
+        assert [a.team_id for a in sorted(members, key=lambda a: a.draw_order)] == [
+            a.team_id for a in members
+        ]
+
+
+def test_group_draw_order_persists(tmp_path):
+    """추첨 후 저장→재로드 시 draw_order가 보존된다."""
+    store = ApplicationStore(path=tmp_path / "a.json", scrim_date=SCRIM, applications=_apps(15))
+    pri = PriorityStore.load(tmp_path / "p.json")
+    ds = DrawState.load(tmp_path / "d.json", SCRIM)
+    DrawOrchestrator(store, pri, ds, team_slots=8)._execute_draw()
+    reloaded = ApplicationStore.load(tmp_path / "a.json", SCRIM)
+    grouped = [a for a in reloaded.applications if a.group in ("A", "B")]
+    assert grouped and all(a.draw_order is not None for a in grouped)
+
+
+def test_group_draw_order_differs_from_application_order(tmp_path):
+    """조 내 표시 순서(draw_order)가 신청순서와 다르다 = 무작위로 섞임."""
+    import random
+
+    random.seed(1)  # 결정적 재현 — identity 순열 아님
+    store = ApplicationStore(path=tmp_path / "a.json", scrim_date=SCRIM, applications=_apps(16))
+    pri = PriorityStore.load(tmp_path / "p.json")
+    ds = DrawState.load(tmp_path / "d.json", SCRIM)
+    res = DrawOrchestrator(store, pri, ds, team_slots=8)._execute_draw()
+    draw_seq = [a.team_id for a in sorted(res.selected, key=lambda a: (a.group, a.draw_order))]
+    app_seq = [a.team_id for a in sorted(res.selected, key=lambda a: (a.group, a.applied_at))]
+    assert draw_seq != app_seq
+
+
+def test_single_mode_draw_order_is_consecutive_permutation(tmp_path):
+    """1개조(단일 8팀) 모드도 선정 팀에 draw_order 0..n-1이 부여된다."""
+    res = _run(tmp_path, 13)
+    assert res.groups is None
+    assert sorted(a.draw_order for a in res.selected) == list(range(len(res.selected)))
+    # 탈락 팀엔 draw_order 미부여
+    assert all(a.draw_order is None for a in res.rejected)
+
+
+def test_single_mode_draw_order_differs_from_application_order(tmp_path):
+    """1개조 표시 순서(draw_order)가 신청순서와 다르다 = 번호까지 무작위."""
+    import random
+
+    random.seed(3)  # 결정적 재현 — identity 순열 아님
+    store = ApplicationStore(path=tmp_path / "a.json", scrim_date=SCRIM, applications=_apps(13))
+    pri = PriorityStore.load(tmp_path / "p.json")
+    ds = DrawState.load(tmp_path / "d.json", SCRIM)
+    res = DrawOrchestrator(store, pri, ds, team_slots=8)._execute_draw()
+    draw_seq = [a.team_id for a in sorted(res.selected, key=lambda a: a.draw_order)]
+    app_seq = [a.team_id for a in sorted(res.selected, key=lambda a: a.applied_at)]
+    assert draw_seq != app_seq

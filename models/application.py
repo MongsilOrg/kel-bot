@@ -33,6 +33,7 @@ class Application:
     had_priority: bool = False
     status: ApplicationStatus = ApplicationStatus.PENDING
     group: str | None = None  # 두 중대 편성 시 "A"(1중대) / "B"(2중대)
+    draw_order: int | None = None  # 추첨 시 조 내 무작위 표시 순서 (셔플 결과 고정)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -51,6 +52,7 @@ class Application:
             had_priority=data.get("had_priority", False),
             status=ApplicationStatus(data.get("status", "pending")),
             group=data.get("group"),
+            draw_order=data.get("draw_order"),
         )
 
 
