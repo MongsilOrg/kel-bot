@@ -131,7 +131,7 @@ def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
     for e in entries:
         when = format_kst_short(e.removed_at) or e.removed_at
         mark = "➕" if getattr(e, "action", "revoke") == "grant" else "➖"
-        lines.append(f"`{when}` {mark} {e.region} · <@{e.actor_id}>")
+        lines.append(f"`{when}` {mark} {e.region} <@{e.actor_id}>")
     return "\n".join(lines)
 
 
@@ -139,7 +139,7 @@ def _draw_status_label(snapshot: DashboardSnapshot) -> str:
     apps = len(snapshot.applications)
     if snapshot.draw_status is DrawStatus.DONE:
         when = format_kst_short(snapshot.drawn_at)
-        return f"✅ 추첨 완료 · {when}" if when else "✅ 추첨 완료"
+        return f"✅ 추첨 완료 ({when})" if when else "✅ 추첨 완료"
     if snapshot.draw_status is DrawStatus.CANCELLED:
         if apps == 0:
             return "🌙 오늘 신청 없이 마감"
@@ -155,7 +155,7 @@ def _format_scrim_title(scrim_date: str) -> str:
     try:
         d = date_cls.fromisoformat(scrim_date)
     except ValueError:
-        return f"🏆 KEL 스크림 — {scrim_date}"
+        return f"🏆 KEL 스크림 {scrim_date}"
     weekday = _WEEKDAYS[d.weekday()]
     return f"🏆 {d.month}/{d.day} ({weekday}) KEL 스크림"
 
@@ -218,14 +218,14 @@ class DashboardView(LayoutView):
         title = _format_scrim_title(snapshot.scrim_date)
         status_label = _draw_status_label(snapshot)
         count = f"`{len(snapshot.applications)} / {snapshot.team_slots}`팀"
-        header_status = f"{status_label} · {count}"
+        header_status = f"{status_label} {count}"
 
         is_done = snapshot.draw_status is DrawStatus.DONE
 
         header_lines = [f"## {title}", header_status]
         if not is_done and snapshot.priority_regions:
             priority_text = ", ".join(sorted(snapshot.priority_regions))
-            header_lines.append(f"⭐ 우선권 · {priority_text}")
+            header_lines.append(f"⭐ 우선권: {priority_text}")
 
         children = [
             TextDisplay(content="\n".join(header_lines)),
@@ -248,7 +248,7 @@ class DashboardView(LayoutView):
                 children.append(TextDisplay(content=f"### 탈락 팀\n{rejected}"))
             if snapshot.next_day_priority_regions:
                 next_priority_text = ", ".join(sorted(snapshot.next_day_priority_regions))
-                children.append(TextDisplay(content=f"-# 내일 우선권 · {next_priority_text}"))
+                children.append(TextDisplay(content=f"-# 내일 우선권: {next_priority_text}"))
         else:
             teams = _format_pending_lines(snapshot)
             children.append(TextDisplay(content=f"### 신청 팀\n{teams}"))
@@ -267,7 +267,7 @@ class DashboardView(LayoutView):
         children.append(
             TextDisplay(
                 content=(
-                    "-# `21:00` 초기화 · `00:30` 추첨 · `17:00` 마감 · "
+                    "-# `21:00` 초기화 / `00:30` 추첨 / `17:00` 마감 / "
                     "닉네임 `지역) 이름` 필수"
                 )
             )
@@ -401,7 +401,7 @@ class PriorityManageView(LayoutView):
 
         current = ", ".join(removable_regions) if removable_regions else "없음"
         children = [
-            TextDisplay(content=f"## ⭐ 우선권 · {target_label}\n현재 {current}"),
+            TextDisplay(content=f"## ⭐ 우선권 {target_label}\n현재 {current}"),
             Separator(),
             ActionRow(self.add_button),
         ]
