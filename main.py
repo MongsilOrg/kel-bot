@@ -14,7 +14,9 @@ from config.settings import PROJECT_ROOT, SETTINGS  # import 시점에 load_dote
 # 장애 추적. settings import로 .env가 로드된 뒤여야 DSN이 잡힌다.
 # DSN이 비어 있으면 transport가 없어 어디로도 전송되지 않는다.
 def _sentry_before_send(event, hint):
-    """일시적 네트워크 에러는 Sentry로 보내지 않는다."""
+    """discord 재연결 과정의 일시적 네트워크 에러는 Sentry로 보내지 않는다."""
+    if event.get("logger") not in ("discord.client", "discord.gateway"):
+        return event
     exc_info = hint.get("exc_info")
     if exc_info:
         name = getattr(exc_info[0], "__name__", "")
