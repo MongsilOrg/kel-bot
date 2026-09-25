@@ -92,3 +92,12 @@ def test_reset_actual_change_recreates(tmp_path):
     calls.clear()
     asyncio.run(mgr._run_reset())
     assert "reset" in calls
+
+
+def test_guarded_job_swallows_exception(tmp_path, caplog):
+    async def boom():
+        raise RuntimeError("x")
+
+    runner = ScheduleManager._guarded("테스트", boom)
+    asyncio.run(runner())
+    assert any(r.levelname == "ERROR" and r.exc_info for r in caplog.records)

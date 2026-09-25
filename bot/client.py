@@ -59,7 +59,13 @@ class KelBot(commands.Bot):
     async def on_ready(self) -> None:
         assert self.schedule is not None and self.dashboard is not None
         logger.info("로그인 완료: %s (%s)", self.user, self.user.id if self.user else "?")
-        await self.dashboard.setup()
-        await self.schedule.catch_up()
+        try:
+            await self.dashboard.setup()
+        except Exception:
+            logger.exception("[대시보드] 초기 설정 실패 - 스케줄러는 계속 가동")
+        try:
+            await self.schedule.catch_up()
+        except Exception:
+            logger.exception("[스케줄] 재시작 보정 실패 - 스케줄러는 계속 가동")
         self.schedule.start()
         logger.info("스케줄러 가동 — 21:00 리셋 / 00:30 추첨 / 17:00 데드라인 KST")

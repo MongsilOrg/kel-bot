@@ -68,9 +68,26 @@ class ScheduleManager:
             audit=PriorityAuditStore.load(data_dir / "priority_audit.json"),
         )
 
-        self._reset_task = tasks.loop(time=time(hour=21, minute=0, tzinfo=KST))(self._run_reset)
-        self._draw_task = tasks.loop(time=time(hour=0, minute=30, tzinfo=KST))(self._run_draw)
-        self._deadline_task = tasks.loop(time=time(hour=17, minute=0, tzinfo=KST))(self._run_deadline)
+        self._reset_task = tasks.loop(time=time(hour=21, minute=0, tzinfo=KST))(
+            self._guarded("일일 리셋", self._run_reset)
+        )
+        self._draw_task = tasks.loop(time=time(hour=0, minute=30, tzinfo=KST))(
+            self._guarded("1차 추첨", self._run_draw)
+        )
+        self._deadline_task = tasks.loop(time=time(hour=17, minute=0, tzinfo=KST))(
+            self._guarded("데드라인", self._run_deadline)
+        )
+
+    @staticmethod
+    def _guarded(name: str, job: SimpleCallback) -> SimpleCallback:
+        # tasks.loop는 예외 한 번에 영구 정지
+        async def runner() -> None:
+            try:
+                await job()
+            except Exception:
+                logger.exception("[스케줄] %s 작업 실패 - 다음 회차에 재시도", name)
+
+        return runner
 
     # 외부 접근 ------------------------------------------------------------
     @property
@@ -193,7 +210,21 @@ class ScheduleManager:
 
     async def _run_draw(self) -> None:
         async with self._lock:
+            draw_state = self._state.draw_state
+            already = draw_state.status
             result = self.orchestrator().attempt_primary_draw()
+            if result is not None:
+                logger.info(
+                    "[스케줄] 1차 추첨 실행 - 선정: %d, 탈락: %d", len(result.selected), len(result.rejected)
+                )
+            elif draw_state.status == DrawStatus.HELD:
+                logger.info(
+                    "[스케줄] 1차 추첨 보류 - 신청: %d/%d",
+                    self._state.applications.count_active(),
+                    self.settings.team_slots,
+                )
+            else:
+                logger.info("[스케줄] 1차 추첨 스킵 - 상태: %s", already.value)
         if result is not None:
             await self.on_draw(result)
         else:
@@ -201,9 +232,16 @@ class ScheduleManager:
 
     async def _run_deadline(self) -> None:
         async with self._lock:
+            status = self._state.draw_state.status
+            processed = self._state.draw_state.deadline_processed
             cancelled = self.orchestrator().force_deadline_cancel()
             if cancelled:
+                logger.info("[스케줄] 데드라인 처리 - 미달 취소, 신청: %d", self._state.applications.count_active())
                 self._early_reset_to_next_day()
+            elif processed:
+                logger.info("[스케줄] 데드라인 스킵 - 이미 처리됨")
+            else:
+                logger.info("[스케줄] 데드라인 처리 - 취소 없음, 상태: %s", status.value)
         if cancelled:
             # 17:00 미추첨 취소 → 조기 초기화 → 대시보드 메시지 재생성
             await self.on_reset()
