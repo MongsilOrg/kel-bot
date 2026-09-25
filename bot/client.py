@@ -11,7 +11,7 @@ from commands.dashboard import DashboardController
 from config.settings import Settings
 from models.schedule_manager import ScheduleManager
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.client")
 
 
 class KelBot(commands.Bot):

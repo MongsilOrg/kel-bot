@@ -19,7 +19,7 @@ from models.priority import PriorityStore
 from models.priority_audit import PriorityAuditStore
 from utils.time import KST, current_scrim_date, kst_at, now_kst
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.schedule_manager")
 
 
 DrawCallback = Callable[[DrawResult], Awaitable[None]]

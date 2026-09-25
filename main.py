@@ -36,7 +36,7 @@ sentry_sdk.init(
 
 def main() -> None:
     setup_logging(log_path=PROJECT_ROOT / "kelbot.log")
-    logger = logging.getLogger("kelbot")
+    logger = logging.getLogger("kel-bot")
     logger.info("kelbot 시작")
     asyncio.run(run_bot(SETTINGS))
 

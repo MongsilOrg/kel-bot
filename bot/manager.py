@@ -8,7 +8,7 @@ import signal
 from bot.client import KelBot
 from config.settings import Settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.manager")
 
 
 async def run_bot(settings: Settings) -> None:

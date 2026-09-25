@@ -29,7 +29,7 @@ from services.discord_service import (
 from utils.nickname import NicknameFormatError, parse as parse_nickname
 from utils.time import KST, kst_at, now_kst
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.dashboard")
 
 
 class DashboardController:

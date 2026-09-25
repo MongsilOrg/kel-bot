@@ -33,7 +33,7 @@ from models.priority_audit import RemovalEntry
 
 _WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.views")
 
 ApplyHandler = Callable[[discord.Interaction], Awaitable[None]]
 CancelHandler = Callable[[discord.Interaction], Awaitable[None]]

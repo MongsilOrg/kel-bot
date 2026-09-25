@@ -11,7 +11,7 @@ from models.draw_state import DrawState, DrawStatus
 from models.priority import PriorityStore
 from utils.time import iso_now
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.draw_orchestrator")
 
 # 이 팀 수 이상이면 8팀 선정 대신 두 중대로 나눠 전원 편성 (14→7/7, 15→8/7, 16→8/8)
 TWO_COMPANY_TEAMS = 14

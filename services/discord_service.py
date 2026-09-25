@@ -8,7 +8,7 @@ import discord
 
 from models.storage import read_json, write_json
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kel-bot.discord_service")
 
 
 def load_message_id(path: Path) -> int | None:
