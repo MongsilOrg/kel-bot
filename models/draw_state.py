@@ -22,6 +22,7 @@ class DrawState:
     status: DrawStatus = DrawStatus.PENDING
     drawn_at: str | None = None
     deadline_processed: bool = False
+    previous_cancel: dict | None = None
 
     @classmethod
     def load(cls, path: Path, scrim_date_hint: str) -> "DrawState":
@@ -33,6 +34,7 @@ class DrawState:
                 status=DrawStatus(raw.get("status", "pending")),
                 drawn_at=raw.get("drawn_at"),
                 deadline_processed=raw.get("deadline_processed", False),
+                previous_cancel=raw.get("previous_cancel"),
             )
         state = cls(path=path, scrim_date=scrim_date_hint)
         state.save()
@@ -46,6 +48,7 @@ class DrawState:
                 "status": self.status.value,
                 "drawn_at": self.drawn_at,
                 "deadline_processed": self.deadline_processed,
+                "previous_cancel": self.previous_cancel,
             },
         )
 
@@ -54,6 +57,7 @@ class DrawState:
         self.status = DrawStatus.PENDING
         self.drawn_at = None
         self.deadline_processed = False
+        self.previous_cancel = None
         self.save()
 
     def is_drawn(self) -> bool:

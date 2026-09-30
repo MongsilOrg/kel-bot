@@ -68,4 +68,8 @@ class KelBot(commands.Bot):
         except Exception:
             logger.exception("[스케줄] 재시작 보정 실패 - 스케줄러는 계속 가동")
         self.schedule.start()
-        logger.info("스케줄러 가동 — 21:00 리셋 / 00:30 추첨 / 17:00 데드라인 KST")
+        s = self.settings
+        logger.info(
+            "스케줄러 가동: %02d:00 리셋, %02d:%02d 추첨, %02d:00 데드라인 KST",
+            s.reset_hour, s.draw_hour, s.draw_minute, s.deadline_hour,
+        )

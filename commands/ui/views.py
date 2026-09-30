@@ -28,6 +28,7 @@ from commands.ui.layout_helpers import (
     success_view,
 )
 from models.application import Application, ApplicationStatus
+from models.draw_orchestrator import TWO_COMPANY_TEAMS
 from models.draw_state import DrawStatus
 from models.priority_audit import RemovalEntry
 
@@ -71,8 +72,11 @@ class DashboardSnapshot:
     next_day_priority_regions: set[str]
     draw_status: DrawStatus
     drawn_at: Optional[str]
-    deadline_processed: bool
     application_open: bool
+    reset_at: str = "21:00"
+    draw_at: str = "00:30"
+    deadline_at: str = "17:00"
+    previous_cancel: Optional[dict] = None
     removal_log: List[RemovalEntry] = field(default_factory=list)
 
 
@@ -139,16 +143,42 @@ def _draw_status_label(snapshot: DashboardSnapshot) -> str:
     apps = len(snapshot.applications)
     if snapshot.draw_status is DrawStatus.DONE:
         when = format_kst_short(snapshot.drawn_at)
-        return f"✅ 추첨 완료 ({when})" if when else "✅ 추첨 완료"
+        return f"✅ {when} 추첨 완료" if when else "✅ 추첨 완료"
     if snapshot.draw_status is DrawStatus.CANCELLED:
         if apps == 0:
             return "🌙 오늘 신청 없이 마감"
-        return f"❌ 8팀 미달로 취소"
+        return f"❌ {snapshot.team_slots}팀 미달로 취소"
     if snapshot.draw_status is DrawStatus.HELD:
         return "⏸️ 추첨 보류 중"
     if not snapshot.application_open:
         return "🌙 신청 마감"
     return "🟢 신청 접수 중"
+
+
+def _format_count(snapshot: DashboardSnapshot) -> str:
+    total = len(snapshot.applications)
+    if snapshot.draw_status is not DrawStatus.CANCELLED and (
+        _has_groups(snapshot) or total >= TWO_COMPANY_TEAMS
+    ):
+        return f"`{total}`팀, 두 중대 편성"
+    return f"`{total} / {snapshot.team_slots}`팀"
+
+
+def _format_previous_cancel(snapshot: DashboardSnapshot) -> Optional[str]:
+    prev = snapshot.previous_cancel
+    if not prev:
+        return None
+    try:
+        d = date_cls.fromisoformat(prev["scrim_date"])
+    except (KeyError, ValueError):
+        return None
+    applicants = prev.get("applicants", 0)
+    if applicants == 0:
+        return f"🌙 {d.month}/{d.day} 스크림은 신청 팀이 없어 열리지 않았습니다."
+    return (
+        f"❌ {d.month}/{d.day} 스크림은 {applicants}팀만 신청해 "
+        f"{snapshot.team_slots}팀 미달로 취소되었습니다."
+    )
 
 
 def _format_scrim_title(scrim_date: str) -> str:
@@ -217,12 +247,15 @@ class DashboardView(LayoutView):
 
         title = _format_scrim_title(snapshot.scrim_date)
         status_label = _draw_status_label(snapshot)
-        count = f"`{len(snapshot.applications)} / {snapshot.team_slots}`팀"
-        header_status = f"{status_label} {count}"
+        header_status = f"{status_label} {_format_count(snapshot)}"
 
         is_done = snapshot.draw_status is DrawStatus.DONE
 
-        header_lines = [f"## {title}", header_status]
+        header_lines = [f"## {title}"]
+        previous_cancel = _format_previous_cancel(snapshot)
+        if previous_cancel:
+            header_lines.append(previous_cancel)
+        header_lines.append(header_status)
         if not is_done and snapshot.priority_regions:
             priority_text = ", ".join(sorted(snapshot.priority_regions))
             header_lines.append(f"⭐ 우선권: {priority_text}")
@@ -242,7 +275,9 @@ class DashboardView(LayoutView):
                 )
             else:
                 selected = _format_selected_lines(snapshot)
-                children.append(TextDisplay(content=f"### 선정 8팀\n{selected}"))
+                children.append(
+                    TextDisplay(content=f"### 선정 {snapshot.team_slots}팀\n{selected}")
+                )
             if any(a.status is ApplicationStatus.REJECTED for a in snapshot.applications):
                 rejected = _format_rejected_lines(snapshot)
                 children.append(TextDisplay(content=f"### 탈락 팀\n{rejected}"))
@@ -267,8 +302,8 @@ class DashboardView(LayoutView):
         children.append(
             TextDisplay(
                 content=(
-                    "-# `21:00` 초기화 / `00:30` 추첨 / `17:00` 마감 / "
-                    "닉네임 `지역) 이름` 필수"
+                    f"-# `{snapshot.reset_at}` 초기화 / `{snapshot.draw_at}` 추첨 / "
+                    f"`{snapshot.deadline_at}` 마감 / 닉네임 `지역) 이름` 필수"
                 )
             )
         )

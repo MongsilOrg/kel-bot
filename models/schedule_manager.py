@@ -37,9 +37,9 @@ class StateBundle:
 class ScheduleManager:
     """일일 운영 스케줄 + 재시작 보정.
 
-    - 21:00 일일 리셋
-    - 00:30 1차 추첨 (미달 시 보류)
-    - 17:00 데드라인 (미달 취소 + 우선권 소멸)
+    - RESET_HOUR 일일 리셋
+    - DRAW_HOUR:DRAW_MINUTE 1차 추첨, 미달이면 보류
+    - DEADLINE_HOUR 데드라인, 미달 취소와 우선권 소멸
     - 신청/취소 이벤트 시 즉시 추첨 트리거
     """
 
@@ -68,13 +68,15 @@ class ScheduleManager:
             audit=PriorityAuditStore.load(data_dir / "priority_audit.json"),
         )
 
-        self._reset_task = tasks.loop(time=time(hour=21, minute=0, tzinfo=KST))(
+        self._reset_task = tasks.loop(time=time(hour=settings.reset_hour, minute=0, tzinfo=KST))(
             self._guarded("일일 리셋", self._run_reset)
         )
-        self._draw_task = tasks.loop(time=time(hour=0, minute=30, tzinfo=KST))(
+        self._draw_task = tasks.loop(
+            time=time(hour=settings.draw_hour, minute=settings.draw_minute, tzinfo=KST)
+        )(
             self._guarded("1차 추첨", self._run_draw)
         )
-        self._deadline_task = tasks.loop(time=time(hour=17, minute=0, tzinfo=KST))(
+        self._deadline_task = tasks.loop(time=time(hour=settings.deadline_hour, minute=0, tzinfo=KST))(
             self._guarded("데드라인", self._run_deadline)
         )
 
@@ -116,7 +118,7 @@ class ScheduleManager:
         time_based = current_scrim_date(self.settings.reset_hour).isoformat()
         # 저장된 일자가 과거면 시간 기준으로 catch-up (놓친 리셋). 미래/현재면 그대로.
         if self._state.draw_state.scrim_date < time_based:
-            logger.info("놓친 리셋 catch-up — %s → %s", self._state.draw_state.scrim_date, time_based)
+            logger.info("[스케줄] 놓친 리셋 보정: %s에서 %s로", self._state.draw_state.scrim_date, time_based)
             self._reset_to(time_based)
         scrim_date = self._state.draw_state.scrim_date
         self._state.priorities.purge_outdated(scrim_date)
@@ -165,11 +167,14 @@ class ScheduleManager:
         return True
 
     def _early_reset_to_next_day(self) -> None:
-        """미진행 확정(17:00) 직후 D+1로 즉시 전환."""
+        """데드라인 미진행 확정 직후 D+1로 즉시 전환하고 취소 결과를 남긴다."""
         current = self._state.draw_state.scrim_date
+        applicants = self._state.applications.count_active()
         next_date = (date_cls.fromisoformat(current) + timedelta(days=1)).isoformat()
-        logger.info("미진행 확정 → 즉시 D+1 리셋: %s → %s", current, next_date)
+        logger.info("[스케줄] 미진행 확정, D+1 즉시 리셋: %s에서 %s로", current, next_date)
         self._reset_to(next_date)
+        self._state.draw_state.previous_cancel = {"scrim_date": current, "applicants": applicants}
+        self._state.draw_state.save()
         self._state.priorities.purge_outdated(next_date)
         self._state.audit.purge_outdated(next_date)
 
@@ -201,9 +206,9 @@ class ScheduleManager:
             self._state.priorities.purge_outdated(scrim_date)
             self._state.audit.purge_outdated(scrim_date)
             if changed:
-                logger.info("일일 리셋 실행 → %s", scrim_date)
+                logger.info("[스케줄] 일일 리셋 실행: %s", scrim_date)
             else:
-                logger.info("일일 리셋 시각 — 이미 %s로 초기화됨(조기초기화), 스킵", scrim_date)
+                logger.info("[스케줄] 일일 리셋 스킵: 조기 초기화로 이미 %s", scrim_date)
         # 실제 초기화된 경우에만 대시보드 메시지 재생성 (조기초기화로 no-op이면 스킵)
         if changed:
             await self.on_reset()
@@ -243,7 +248,6 @@ class ScheduleManager:
             else:
                 logger.info("[스케줄] 데드라인 처리 - 취소 없음, 상태: %s", status.value)
         if cancelled:
-            # 17:00 미추첨 취소 → 조기 초기화 → 대시보드 메시지 재생성
             await self.on_reset()
         else:
             await self.on_state_changed()

@@ -101,3 +101,14 @@ def test_guarded_job_swallows_exception(tmp_path, caplog):
     runner = ScheduleManager._guarded("테스트", boom)
     asyncio.run(runner())
     assert any(r.levelname == "ERROR" and r.exc_info for r in caplog.records)
+
+
+def test_deadline_cancel_keeps_previous_result(tmp_path):
+    calls = []
+    mgr = _manager(tmp_path, calls)
+    cancelled_date = mgr.state.draw_state.scrim_date
+    mgr.state.applications.add(region="광주", applicant_id="1", applicant_display="광주) 가", had_priority=False)
+    asyncio.run(mgr._run_deadline())
+    assert mgr.state.draw_state.previous_cancel == {"scrim_date": cancelled_date, "applicants": 1}
+    mgr.state.draw_state.reset("2099-01-01")
+    assert mgr.state.draw_state.previous_cancel is None

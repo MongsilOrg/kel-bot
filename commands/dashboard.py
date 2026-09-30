@@ -105,6 +105,11 @@ class DashboardController:
         next_date = (date_cls.fromisoformat(scrim_date) + timedelta(days=1)).isoformat()
         next_day_priority_regions = state.priorities.regions_for(next_date)
         application_open = self._is_application_window_open(scrim_date)
+        removal_log = sorted(
+            state.audit.entries_for(scrim_date) + state.audit.entries_for(next_date),
+            key=lambda e: e.removed_at,
+        )
+        s = self.settings
         return DashboardSnapshot(
             scrim_date=scrim_date,
             team_slots=self.settings.team_slots,
@@ -113,9 +118,12 @@ class DashboardController:
             next_day_priority_regions=next_day_priority_regions,
             draw_status=state.draw_state.status,
             drawn_at=state.draw_state.drawn_at,
-            deadline_processed=state.draw_state.deadline_processed,
             application_open=application_open,
-            removal_log=state.audit.entries_for(scrim_date),
+            reset_at=f"{s.reset_hour:02d}:00",
+            draw_at=f"{s.draw_hour:02d}:{s.draw_minute:02d}",
+            deadline_at=f"{s.deadline_hour:02d}:00",
+            previous_cancel=state.draw_state.previous_cancel,
+            removal_log=removal_log,
         )
 
     def _is_application_window_open(self, scrim_date: str) -> bool:
