@@ -236,8 +236,8 @@ def test_confirm_remove_after_draw_targets_next_day(tmp_path):
     it = _Interaction(42, "서울) 운영자")
     asyncio.run(ctrl._confirm_remove_priority(it, "대전", nxt))
     assert mgr.state.priorities.regions_for(nxt) == set()
-    # 로그는 오늘(현재 표시 일자) 기준으로 기록
-    assert len(mgr.state.audit.entries_for(d)) == 1
+    # D+1 리셋 뒤에도 남도록 대상 일자로 기록
+    assert len(mgr.state.audit.entries_for(nxt)) == 1
 
 
 def test_confirm_remove_rejects_when_target_changed_by_draw(tmp_path):

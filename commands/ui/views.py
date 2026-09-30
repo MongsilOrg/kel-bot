@@ -21,6 +21,8 @@ from discord.ui import (
     TextInput,
 )
 
+from discord.utils import escape_markdown
+
 from commands.ui.layout_helpers import (
     FOOTER_TEXT,
     error_view,
@@ -87,7 +89,7 @@ def _format_pending_lines(snapshot: DashboardSnapshot) -> str:
     lines = []
     for idx, app in enumerate(apps, start=1):
         marker = "★ " if app.region in snapshot.priority_regions else "　 "
-        lines.append(f"`{idx:>2}.` {marker}{app.applicant_display}")
+        lines.append(f"`{idx:>2}.` {marker}{escape_markdown(app.applicant_display)}")
     return "\n".join(lines)
 
 
@@ -98,7 +100,7 @@ def _format_selected_lines(snapshot: DashboardSnapshot) -> str:
     lines = []
     for idx, app in enumerate(apps, start=1):
         marker = "★ " if app.had_priority else "　 "
-        lines.append(f"`{idx:>2}.` {marker}{app.applicant_display}")
+        lines.append(f"`{idx:>2}.` {marker}{escape_markdown(app.applicant_display)}")
     return "\n".join(lines)
 
 
@@ -112,7 +114,7 @@ def _format_group_lines(snapshot: DashboardSnapshot, group_label: str) -> str:
     lines = []
     for idx, app in enumerate(apps, start=1):
         marker = "★ " if app.had_priority else "　 "
-        lines.append(f"`{idx:>2}.` {marker}{app.applicant_display}")
+        lines.append(f"`{idx:>2}.` {marker}{escape_markdown(app.applicant_display)}")
     return "\n".join(lines)
 
 
@@ -127,7 +129,9 @@ def _format_rejected_lines(snapshot: DashboardSnapshot) -> str:
     apps = [a for a in snapshot.applications if a.status is ApplicationStatus.REJECTED]
     if not apps:
         return "_없음_"
-    return "\n".join(f"• {a.applicant_display}" for a in apps)
+    return "\n".join(
+        f"`{idx:>2}.` {escape_markdown(a.applicant_display)}" for idx, a in enumerate(apps, start=1)
+    )
 
 
 def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
@@ -135,7 +139,7 @@ def _format_removal_log_lines(entries: List[RemovalEntry]) -> str:
     for e in entries:
         when = format_kst_short(e.removed_at) or e.removed_at
         mark = "➕" if getattr(e, "action", "revoke") == "grant" else "➖"
-        lines.append(f"`{when}` {mark} {e.region} <@{e.actor_id}>")
+        lines.append(f"`{when}` {mark} {escape_markdown(e.region)} <@{e.actor_id}>")
     return "\n".join(lines)
 
 
@@ -257,7 +261,7 @@ class DashboardView(LayoutView):
             header_lines.append(previous_cancel)
         header_lines.append(header_status)
         if not is_done and snapshot.priority_regions:
-            priority_text = ", ".join(sorted(snapshot.priority_regions))
+            priority_text = escape_markdown(", ".join(sorted(snapshot.priority_regions)))
             header_lines.append(f"⭐ 우선권: {priority_text}")
 
         children = [
@@ -282,7 +286,7 @@ class DashboardView(LayoutView):
                 rejected = _format_rejected_lines(snapshot)
                 children.append(TextDisplay(content=f"### 탈락 팀\n{rejected}"))
             if snapshot.next_day_priority_regions:
-                next_priority_text = ", ".join(sorted(snapshot.next_day_priority_regions))
+                next_priority_text = escape_markdown(", ".join(sorted(snapshot.next_day_priority_regions)))
                 children.append(TextDisplay(content=f"-# 내일 우선권: {next_priority_text}"))
         else:
             teams = _format_pending_lines(snapshot)
@@ -362,8 +366,24 @@ class DashboardView(LayoutView):
                 )
 
 
+class _EphemeralPanel(LayoutView):
+    """시간이 지나면 닫히는 ephemeral 패널. 응답 직후 origin 지정 필요."""
+
+    origin: Optional[discord.Interaction] = None
+
+    async def on_timeout(self) -> None:
+        if self.origin is None:
+            return
+        try:
+            await self.origin.edit_original_response(
+                view=info_view("시간이 지나 닫혔습니다. 버튼을 다시 눌러주세요.")
+            )
+        except discord.HTTPException:
+            pass
+
+
 # 취소 확인 -----------------------------------------------------------------
-class CancelConfirmView(LayoutView):
+class CancelConfirmView(_EphemeralPanel):
     """취소 확인 LayoutView (ephemeral)."""
 
     def __init__(
@@ -382,9 +402,8 @@ class CancelConfirmView(LayoutView):
         )
         self.confirm_button.callback = self._confirm
         self.back_button = Button(
-            label="돌아가기",
+            label="아니요",
             style=ButtonStyle.secondary,
-            emoji="↩️",
         )
         self.back_button.callback = self._back
 
@@ -403,16 +422,18 @@ class CancelConfirmView(LayoutView):
         self.add_item(container)
 
     async def _confirm(self, interaction: discord.Interaction) -> None:
+        self.stop()
         await self.on_confirm(interaction)
 
     async def _back(self, interaction: discord.Interaction) -> None:
+        self.stop()
         await interaction.response.edit_message(
-            view=info_view("이전 화면으로 돌아갔습니다."),
+            view=info_view("신청을 취소하지 않았습니다."),
         )
 
 
 # 우선권 관리 ---------------------------------------------------------------
-class PriorityManageView(LayoutView):
+class PriorityManageView(_EphemeralPanel):
     """우선권 관리 패널 (ephemeral): 추가 버튼 + 제거 지역 Select."""
 
     def __init__(
@@ -434,7 +455,7 @@ class PriorityManageView(LayoutView):
         )
         self.add_button.callback = self._on_add
 
-        current = ", ".join(removable_regions) if removable_regions else "없음"
+        current = escape_markdown(", ".join(removable_regions)) if removable_regions else "없음"
         children = [
             TextDisplay(content=f"## ⭐ 우선권 {target_label}\n현재 {current}"),
             Separator(),
@@ -460,6 +481,7 @@ class PriorityManageView(LayoutView):
 
     async def _on_remove(self, interaction: discord.Interaction) -> None:
         assert self.select is not None
+        self.stop()
         await self.on_remove_select(interaction, self.select.values[0])
 
 
@@ -473,8 +495,8 @@ class PriorityAddModal(Modal):
         self.region_input = TextInput(
             label="지역",
             placeholder="예: 광주",
-            min_length=2,
-            max_length=2,
+            min_length=1,
+            max_length=10,
             required=True,
         )
         self.add_item(self.region_input)

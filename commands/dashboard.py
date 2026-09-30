@@ -31,6 +31,9 @@ from utils.time import KST, kst_at, now_kst
 
 logger = logging.getLogger("kel-bot.dashboard")
 
+_CLOSED_MESSAGE = "신청이 마감되었습니다."
+_STALE_MESSAGE = "추첨이 진행되어 우선권 상태가 변경되었습니다.\n다시 시도해주세요."
+
 
 class DashboardController:
     """대시보드 메시지 관리 + 버튼 콜백 + 추첨 결과 공지."""
@@ -58,6 +61,12 @@ class DashboardController:
             await self._edit_message(message)
             logger.info("기존 대시보드 메시지 재바인딩: %s", message.id)
         self._dashboard_message = message
+
+    def register_persistent_view(self) -> None:
+        # 부팅 시 setup이 실패해도 기존 메시지의 버튼이 응답하도록 선등록
+        self.bot.add_view(
+            self._build_dashboard_view(), message_id=load_message_id(self._dashboard_path)
+        )
 
     # 갱신 ----------------------------------------------------------------
     async def refresh(self) -> None:
@@ -218,6 +227,7 @@ class DashboardController:
             on_confirm=self._confirm_cancel,
         )
         await interaction.response.send_message(view=confirm_view, ephemeral=True)
+        confirm_view.origin = interaction
 
     async def _confirm_cancel(self, interaction: discord.Interaction) -> None:
         async with self.schedule.lock:
@@ -273,6 +283,7 @@ class DashboardController:
             on_remove_select=on_remove_select,
         )
         await interaction.response.send_message(view=view, ephemeral=True)
+        view.origin = interaction
 
     def _target_label(self, target: str) -> str:
         """관리 패널 헤더용 대상 일자 라벨 — 예 `7/12(오늘)`."""
@@ -302,29 +313,30 @@ class DashboardController:
         async with self.schedule.lock:
             state = self.schedule.state
             current_target, _ = self._removable_priority()
-            if current_target != opened_target:
+            stale = current_target != opened_target
+            if stale:
                 await interaction.response.send_message(
-                    view=info_view(
-                        "추첨이 진행되어 우선권 상태가 변경되었습니다.\n다시 시도해주세요."
-                    ),
+                    view=info_view(_STALE_MESSAGE),
                     ephemeral=True,
                 )
-                await self.refresh()
-                return
-            if not state.priorities.grant_one(region, opened_target):
+            elif not state.priorities.grant_one(region, opened_target):
                 await interaction.response.send_message(
                     view=info_view(f"`{region}` 우선권이 이미 있습니다."),
                     ephemeral=True,
                 )
                 return
-            display = getattr(interaction.user, "display_name", None) or interaction.user.name
-            state.audit.record(
-                region=region,
-                actor_id=str(interaction.user.id),
-                actor_name=display,
-                scrim_date=state.draw_state.scrim_date,
-                action="grant",
-            )
+            else:
+                display = getattr(interaction.user, "display_name", None) or interaction.user.name
+                state.audit.record(
+                    region=region,
+                    actor_id=str(interaction.user.id),
+                    actor_name=display,
+                    scrim_date=opened_target,
+                    action="grant",
+                )
+        if stale:
+            await self.refresh()
+            return
         logger.info(
             "우선권 부여 · %s · %s(%s) · 대상 %s",
             region, display, interaction.user.id, opened_target,
@@ -341,27 +353,26 @@ class DashboardController:
         async with self.schedule.lock:
             state = self.schedule.state
             current_target, _ = self._removable_priority()
-            if current_target != opened_target:
-                await interaction.response.edit_message(
-                    view=info_view(
-                        "추첨이 진행되어 우선권 상태가 변경되었습니다.\n다시 시도해주세요."
-                    )
-                )
-                await self.refresh()
-                return
-            if not state.priorities.revoke(region, opened_target):
+            stale = current_target != opened_target
+            if stale:
+                await interaction.response.edit_message(view=info_view(_STALE_MESSAGE))
+            elif not state.priorities.revoke(region, opened_target):
                 await interaction.response.edit_message(
                     view=info_view(f"`{region}` 우선권이 이미 없습니다.")
                 )
                 return
-            display = getattr(interaction.user, "display_name", None) or interaction.user.name
-            state.audit.record(
-                region=region,
-                actor_id=str(interaction.user.id),
-                actor_name=display,
-                scrim_date=state.draw_state.scrim_date,
-                action="revoke",
-            )
+            else:
+                display = getattr(interaction.user, "display_name", None) or interaction.user.name
+                state.audit.record(
+                    region=region,
+                    actor_id=str(interaction.user.id),
+                    actor_name=display,
+                    scrim_date=opened_target,
+                    action="revoke",
+                )
+        if stale:
+            await self.refresh()
+            return
         logger.info(
             "우선권 제거 · %s · %s(%s) · 대상 %s",
             region, display, interaction.user.id, opened_target,

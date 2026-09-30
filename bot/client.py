@@ -54,7 +54,7 @@ class KelBot(commands.Bot):
             on_reset=on_reset,
         )
         self.dashboard = DashboardController(self, self.settings, self.schedule)
-        # tasks.loop는 client loop이 준비된 시점에 start 해야 함 → on_ready에서
+        self.dashboard.register_persistent_view()
 
     async def on_ready(self) -> None:
         assert self.schedule is not None and self.dashboard is not None
