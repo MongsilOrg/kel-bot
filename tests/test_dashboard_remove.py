@@ -182,7 +182,7 @@ def test_target_label_today(tmp_path):
     ctrl, mgr = _controller(tmp_path)
     d = mgr.state.draw_state.scrim_date
     dd = date_cls.fromisoformat(d)
-    assert ctrl._target_label(d) == f"{dd.month}/{dd.day}(오늘)"
+    assert ctrl._target_label(d) == f"{dd.month}/{dd.day} 오늘"
 
 
 def test_target_label_tomorrow(tmp_path):
@@ -190,7 +190,7 @@ def test_target_label_tomorrow(tmp_path):
     d = mgr.state.draw_state.scrim_date
     nxt = _next(d)
     dd = date_cls.fromisoformat(nxt)
-    assert ctrl._target_label(nxt) == f"{dd.month}/{dd.day}(내일)"
+    assert ctrl._target_label(nxt) == f"{dd.month}/{dd.day} 내일"
 
 
 def test_confirm_add_rejects_when_target_changed_by_draw(tmp_path):

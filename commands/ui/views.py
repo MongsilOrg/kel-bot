@@ -206,10 +206,7 @@ def format_kst_short(iso: Optional[str]) -> Optional[str]:
 
 
 class DashboardView(LayoutView):
-    """영구 대시보드 메시지의 LayoutView.
-
-    버튼 콜백은 외부에서 주입(`apply_handler`, `cancel_handler`).
-    """
+    """영구 대시보드 메시지의 LayoutView. 버튼 콜백은 외부 주입."""
 
     def __init__(
         self,

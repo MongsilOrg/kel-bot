@@ -15,7 +15,7 @@ logger = logging.getLogger("kel-bot.client")
 
 
 class KelBot(commands.Bot):
-    """KEL 스크림 봇 — 슬래시 명령어 없음, 대시보드 전용."""
+    """KEL 스크림 봇. 슬래시 명령어 없는 대시보드 전용."""
 
     def __init__(self, settings: Settings) -> None:
         intents = discord.Intents.default()

@@ -1,4 +1,4 @@
-"""대시보드 setup/refresh + 신청·취소 버튼 콜백."""
+"""대시보드 setup/refresh와 신청, 취소 버튼 콜백."""
 from __future__ import annotations
 
 import logging
@@ -75,7 +75,7 @@ class DashboardController:
         try:
             await self._edit_message(self._dashboard_message)
         except (discord.NotFound, discord.Forbidden):
-            logger.warning("대시보드 메시지가 손실됨 — 재생성")
+            logger.warning("대시보드 메시지 손실, 재생성")
             self._dashboard_message = None
             await self.setup()
 
@@ -84,14 +84,14 @@ class DashboardController:
         await message.edit(view=view, content=None)
 
     async def recreate(self) -> None:
-        """기존 대시보드 메시지를 삭제하고 새 메시지로 다시 보낸다 (일일/조기 초기화 시)."""
+        """일일 또는 조기 초기화 때 기존 대시보드 메시지를 지우고 새로 보낸다."""
         channel = await fetch_text_channel(self.bot, self.settings.apply_channel_id)
         old = self._dashboard_message
         if old is not None:
             try:
                 await old.delete()
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                logger.warning("기존 대시보드 메시지 삭제 실패 — 무시하고 새로 전송")
+                logger.warning("기존 대시보드 메시지 삭제 실패, 새로 전송")
         view = self._build_dashboard_view()
         message = await channel.send(view=view)
         save_message_id(self._dashboard_path, message.id)
@@ -149,7 +149,7 @@ class DashboardController:
         scrim_date = self.schedule.state.draw_state.scrim_date
         if not self._is_application_window_open(scrim_date):
             await interaction.response.send_message(
-                view=info_view("지금은 신청 시간이 아닙니다."),
+                view=info_view(_CLOSED_MESSAGE),
                 ephemeral=True,
             )
             return
@@ -167,7 +167,7 @@ class DashboardController:
         async with self.schedule.lock:
             if not self._is_application_window_open(self.schedule.state.draw_state.scrim_date):
                 await interaction.response.send_message(
-                    view=info_view("신청이 마감되었습니다."),
+                    view=info_view(_CLOSED_MESSAGE),
                     ephemeral=True,
                 )
                 return
@@ -189,7 +189,7 @@ class DashboardController:
                 return
 
         logger.info(
-            "신청 · %s · %s(%s)%s",
+            "[신청] %s, %s(%s)%s",
             parsed.region,
             display_name,
             member.id,
@@ -243,7 +243,7 @@ class DashboardController:
                 await interaction.response.edit_message(view=info_view(str(exc)))
                 return
         display = getattr(interaction.user, "display_name", None) or interaction.user.name
-        logger.info("취소 · %s · %s(%s)", app.region, display, interaction.user.id)
+        logger.info("[취소] %s, %s(%s)", app.region, display, interaction.user.id)
         await interaction.response.edit_message(
             view=success_view(f"`{app.region}` 신청을 취소했습니다."),
         )
@@ -264,9 +264,7 @@ class DashboardController:
         return target, sorted(state.priorities.regions_for(target))
 
     async def handle_manage_priority(self, interaction: discord.Interaction) -> None:
-        # 패널 오픈 시점의 대상 일자를 캡처해 콜백까지 전달한다.
-        # 선택/입력을 기다리는 사이 추첨·리셋으로 대상 일자가 바뀌면(엉뚱한 일자 반영 방지)
-        # 확정 단계에서 거부한다.
+        # 패널을 연 시점의 대상 일자를 고정. 그 사이 추첨이나 리셋으로 바뀌면 확정 단계에서 거부
         opened_target, regions = self._removable_priority()
         target_label = self._target_label(opened_target)
 
@@ -286,11 +284,11 @@ class DashboardController:
         view.origin = interaction
 
     def _target_label(self, target: str) -> str:
-        """관리 패널 헤더용 대상 일자 라벨 — 예 `7/12(오늘)`."""
+        """관리 패널 헤더용 대상 일자 라벨. 예: `7/12 오늘`."""
         scrim_date = self.schedule.state.draw_state.scrim_date
         d = date_cls.fromisoformat(target)
         when = "오늘" if target == scrim_date else "내일"
-        return f"{d.month}/{d.day}({when})"
+        return f"{d.month}/{d.day} {when}"
 
     async def _open_add_modal(self, interaction: discord.Interaction, opened_target: str) -> None:
         async def on_submit_region(it: discord.Interaction, raw_region: str) -> None:
@@ -338,7 +336,7 @@ class DashboardController:
             await self.refresh()
             return
         logger.info(
-            "우선권 부여 · %s · %s(%s) · 대상 %s",
+            "[우선권 부여] %s, %s(%s), 대상 %s",
             region, display, interaction.user.id, opened_target,
         )
         await interaction.response.send_message(
@@ -374,7 +372,7 @@ class DashboardController:
             await self.refresh()
             return
         logger.info(
-            "우선권 제거 · %s · %s(%s) · 대상 %s",
+            "[우선권 제거] %s, %s(%s), 대상 %s",
             region, display, interaction.user.id, opened_target,
         )
         await interaction.response.edit_message(

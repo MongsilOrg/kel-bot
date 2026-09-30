@@ -16,7 +16,7 @@ async def run_bot(settings: Settings) -> None:
     loop = asyncio.get_running_loop()
 
     def _shutdown() -> None:
-        logger.info("종료 시그널 수신 — 봇 종료")
+        logger.info("종료 시그널 수신, 봇 종료")
         if bot.schedule is not None:
             bot.schedule.stop()
         asyncio.create_task(bot.close())
