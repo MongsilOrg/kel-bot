@@ -27,19 +27,10 @@ def _optional_int(name: str, default: int) -> int:
     return int(raw)
 
 
-def _optional_id(name: str) -> int | None:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return None
-    return int(raw)
-
-
 @dataclass(frozen=True)
 class Settings:
     discord_token: str
-    guild_id: int | None
     apply_channel_id: int
-    log_channel_id: int | None
     reset_hour: int
     draw_hour: int
     draw_minute: int
@@ -52,9 +43,7 @@ def load_settings() -> Settings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return Settings(
         discord_token=_required("DISCORD_TOKEN"),
-        guild_id=_optional_id("GUILD_ID"),
         apply_channel_id=int(_required("APPLY_CHANNEL_ID")),
-        log_channel_id=_optional_id("LOG_CHANNEL_ID"),
         reset_hour=_optional_int("RESET_HOUR", 21),
         draw_hour=_optional_int("DRAW_HOUR", 0),
         draw_minute=_optional_int("DRAW_MINUTE", 30),

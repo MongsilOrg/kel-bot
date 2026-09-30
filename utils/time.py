@@ -11,10 +11,6 @@ def now_kst() -> datetime:
     return datetime.now(KST)
 
 
-def today_kst() -> date:
-    return now_kst().date()
-
-
 def scrim_date_for(moment: datetime, reset_hour: int) -> date:
     """주어진 KST 시각이 속한 스크림 일자(D) 반환.
 
@@ -32,10 +28,6 @@ def current_scrim_date(reset_hour: int) -> date:
 
 def kst_at(target_date: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(target_date, time(hour=hour, minute=minute), tzinfo=KST)
-
-
-def format_kst(moment: datetime) -> str:
-    return moment.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S KST")
 
 
 def iso_now() -> str:

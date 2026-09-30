@@ -27,7 +27,6 @@ from commands.ui.layout_helpers import (
     FOOTER_TEXT,
     error_view,
     info_view,
-    success_view,
 )
 from models.application import Application, ApplicationStatus
 from models.draw_orchestrator import TWO_COMPANY_TEAMS
@@ -500,6 +499,3 @@ class PriorityAddModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await self.on_submit_region(interaction, self.region_input.value)
-
-
-# 추첨 결과 공지 ------------------------------------------------------------

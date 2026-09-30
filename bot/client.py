@@ -31,7 +31,7 @@ class KelBot(commands.Bot):
 
         async def on_draw(result):
             assert self.dashboard is not None
-            await self.dashboard.announce_draw(result)
+            await self.dashboard.announce_draw()
 
         async def on_state_changed():
             if self.dashboard is not None:

@@ -29,8 +29,6 @@ python main.py
 |---|---|
 | DISCORD_TOKEN | 봇 토큰. 필수 |
 | APPLY_CHANNEL_ID | 대시보드를 띄울 채널 ID. 필수 |
-| GUILD_ID | 서버 ID. 선택 |
-| LOG_CHANNEL_ID | 로그 채널 ID. 선택 |
 | RESET_HOUR | 일일 리셋 기준 시각. 기본 21 |
 | DRAW_HOUR | 1차 추첨 시. 기본 0 |
 | DRAW_MINUTE | 1차 추첨 분. 기본 30 |

@@ -9,9 +9,7 @@ from models.schedule_manager import ScheduleManager
 def _settings(tmp_path):
     return Settings(
         discord_token="x",
-        guild_id=None,
         apply_channel_id=1,
-        log_channel_id=None,
         reset_hour=21,
         draw_hour=0,
         draw_minute=30,

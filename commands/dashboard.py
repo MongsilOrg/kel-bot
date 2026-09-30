@@ -17,7 +17,6 @@ from commands.ui.views import (
 )
 from config.settings import Settings
 from models.application import ApplicationError
-from models.draw_orchestrator import DrawResult
 from models.draw_state import DrawStatus
 from models.schedule_manager import ScheduleManager
 from services.discord_service import (
@@ -380,8 +379,8 @@ class DashboardController:
         )
         await self.refresh()
 
-    # 추첨/데드라인 이벤트 — 대시보드만 갱신 (별도 채널 송신 없음)
-    async def announce_draw(self, result: DrawResult) -> None:
+    # 추첨/데드라인 이벤트는 대시보드만 갱신
+    async def announce_draw(self) -> None:
         await self.refresh()
 
     async def announce_deadline_cancelled(self) -> None:
