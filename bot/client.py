@@ -13,6 +13,10 @@ from models.schedule_manager import ScheduleManager
 
 logger = logging.getLogger("kel-bot.client")
 
+# 음성 기능을 쓰지 않아 PyNaCl, davey 미설치 경고를 끔
+discord.VoiceClient.warn_nacl = False
+discord.VoiceClient.warn_dave = False
+
 
 class KelBot(commands.Bot):
     """KEL 스크림 봇. 슬래시 명령어 없는 대시보드 전용."""
